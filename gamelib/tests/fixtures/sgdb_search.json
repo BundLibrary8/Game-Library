@@ -1,0 +1,7 @@
+{
+  "success": true,
+  "data": [
+    { "id": 4242, "name": "Ember Road", "types": ["steam"], "verified": true },
+    { "id": 4243, "name": "Ember Road 2", "types": ["steam"], "verified": true }
+  ]
+}

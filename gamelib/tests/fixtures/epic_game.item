@@ -1,0 +1,23 @@
+{
+	"FormatVersion": 0,
+	"bIsIncompleteInstall": false,
+	"LaunchCommand": "",
+	"LaunchExecutable": "EmberRoad/Binaries/Win64/EmberRoad.exe",
+	"ManifestLocation": "D:\\Epic\\EmberRoad/.egstore",
+	"bIsApplication": true,
+	"bIsExecutable": true,
+	"bIsManaged": false,
+	"bNeedsValidation": false,
+	"bRequiresAuth": true,
+	"bCanRunOffline": true,
+	"AppName": "a1b2c3EmberRoad",
+	"BaseURLs": [],
+	"CatalogNamespace": "emberns",
+	"CatalogItemId": "0123456789abcdef",
+	"AppCategories": ["public", "games", "applications"],
+	"DisplayName": "Ember Road",
+	"InstallLocation": "D:\\Epic\\EmberRoad",
+	"InstallSize": 123456789,
+	"MainGameAppName": "a1b2c3EmberRoad",
+	"MandatoryAppFolderName": "EmberRoad"
+}

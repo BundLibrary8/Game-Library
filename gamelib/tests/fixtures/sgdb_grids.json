@@ -1,0 +1,11 @@
+{
+  "success": true,
+  "data": [
+    { "id": 111, "score": 5, "style": "alternate", "width": 600, "height": 900, "nsfw": false,
+      "url": "https://cdn2.steamgriddb.com/grid/aaaa.png",
+      "thumb": "https://cdn2.steamgriddb.com/thumb/aaaa.jpg" },
+    { "id": 112, "score": 2, "style": "blurred", "width": 600, "height": 900, "nsfw": false,
+      "url": "https://cdn2.steamgriddb.com/grid/bbbb.jpg",
+      "thumb": "https://cdn2.steamgriddb.com/thumb/bbbb.jpg" }
+  ]
+}
