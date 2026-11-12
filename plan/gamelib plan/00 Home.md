@@ -20,6 +20,10 @@ A Windows desktop app, written in **Rust** with **egui**, that gathers every gam
 6. [[06 Metadata and Cover Art]]: downloading covers and info (Section 3, draft)
 7. [[07 UI Screens]]: what each screen looks like (Section 4, draft)
 8. [[08 Errors and Testing]]: what happens when things go wrong, and how it's tested (Section 5, draft)
+9. [[14 UI Designs]]: **mockups** of every main screen, inspired by Steam, Epic, EA and Xbox (draft)
+10. [[15 Design Variants]]: alternative looks: **Constellation** (star-map background), **Daylight List**, **Couch Mode** (draft)
+11. [[16 Profile and Friends]]: profile editing, banners, badges, Steam friends list (draft)
+12. [[17 Shop]]: spend **Stardust ✦** earned by playing on backgrounds, banners, badges and name changes (draft)
 
 ## Building it
 - [[09 Milestones]]: the build order, each step ending in something that works

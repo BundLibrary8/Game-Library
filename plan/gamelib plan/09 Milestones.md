@@ -50,7 +50,23 @@ Learn: traits, threads and channels
 - [ ] Stats page with charts
 - **Done when:** I can find any game in a couple of seconds and the stats page looks good in a screenshot.
 
-## M6: Polish and write-up
+## M6: Profile and friends
+See [[16 Profile and Friends]]
+- [ ] `profile` table + profile page (banner, avatar, name, bio, stat tiles, showcase)
+- [ ] Edit profile window (picture, name, bio, banner picker, badges, showcase)
+- [ ] Earned banners from playtime / finished-game milestones (+ tests)
+- [ ] Steam Web API key + SteamID in Settings; friends fetched on a worker thread and cached
+- **Done when:** my profile shows my real stats and my Steam friends with what they're playing.
+
+## M7: Stardust and Shop
+See [[17 Shop]]
+- [ ] `stardust_ledger` + rewards for playtime, finishing games, daily launch (+ tests)
+- [ ] Built-in catalogue + Shop screen + preview
+- [ ] Buying in one transaction (+ tests for "not enough Stardust" and "already owned")
+- [ ] Equip library backgrounds (incl. **Constellation**), banners, badges; name change item
+- **Done when:** playing earns Stardust, and I can buy and use the Constellation background.
+
+## M8: Polish and write-up
 - [ ] App icon, window size remembered, nice empty states ("No games yet, click Scan")
 - [ ] `cargo build --release` → a single `gamelib.exe`
 - [ ] README with screenshots, features and architecture diagram (reuse [[02 Architecture]])

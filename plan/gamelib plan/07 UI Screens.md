@@ -10,6 +10,9 @@ Back to [[00 Home]] · Prev: [[06 Metadata and Cover Art]] · Next: [[08 Errors 
 > [!warning] Draft
 > Not agreed yet.
 
+> [!example] Mockups
+> Rendered designs for every screen are in [[14 UI Designs]]. They add a **Home** screen, and suggest a **full-page game details** view instead of the side panel sketched below.
+
 ## Main window layout
 ```
 ┌───────────────────────────────────────────────────────────────┐

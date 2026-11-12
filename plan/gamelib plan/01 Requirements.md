@@ -23,6 +23,9 @@ Both of these:
 - [x] **Playtime tracking**: total time and last played
 - [x] **Search, tags, favourites**: filter and organise
 - [x] **Collections and a stats page**: groups like "Backlog", plus most played and totals
+- [x] **Profile**: editable name, picture, bio, **banners**, badges, showcase games ([[16 Profile and Friends]])
+- [x] **Friends list**: proposed as **Steam friends, read-only** ([[16 Profile and Friends]])
+- [x] **Shop**: library backgrounds, profile banners, badges, name changes. Proposed currency: **Stardust earned by playing** ([[17 Shop]])
 
 **Tech**
 - Rust, with an egui UI (chosen over Tauri and Slint/Iced; see [[12 Decisions Log]])
@@ -30,7 +33,7 @@ Both of these:
 
 ## Assumptions (correct these if wrong)
 - **Windows only.**
-- **Local only**: no accounts, no cloud sync. Everything lives on my PC.
+- **Local only**: no GameLib accounts, no cloud sync. Everything lives on my PC. *(Exception: the friends list reads from Steam's API; see [[16 Profile and Friends]].)*
 - One user.
 
 ## Success criteria: "done" looks like
@@ -44,5 +47,7 @@ Both of these:
 ## Out of scope (for now)
 - Mac and Linux
 - Installing or uninstalling games, or buying games
-- Achievements, friends, cloud saves
+- Achievements, cloud saves, chat or messaging friends
+- GameLib's own online accounts or friend system (needs a server, see [[16 Profile and Friends]])
+- **Real-money purchases** (see [[17 Shop#Why no real money (for now)]])
 - Syncing between PCs

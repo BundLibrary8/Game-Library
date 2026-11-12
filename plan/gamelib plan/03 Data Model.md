@@ -74,6 +74,9 @@ play_sessions(id INTEGER PRIMARY KEY, game_id INTEGER NOT NULL,
 settings(key TEXT PRIMARY KEY, value TEXT)   -- API key, scan folders, enabled sources
 ```
 
+**Added for Profile and Shop** (full details in [[16 Profile and Friends#Data (adds to 03 Data Model)]] and [[17 Shop#Data (adds to 03 Data Model)]]):
+`profile`, `profile_showcase`, `profile_badges`, `friends_cache`, `stardust_ledger`, `owned_items`.
+
 ### Design choices to check
 - **Collections are tags with `is_collection = 1`.** "Backlog" is a tag that also appears in the sidebar. That gives one system instead of two and less code. *Open question in [[12 Decisions Log]].*
 - **Rescans never delete your data.** The `UNIQUE(source, source_id)` rule means a rescan updates the title, path and launch info, but keeps favourites, tags, playtime and covers.
