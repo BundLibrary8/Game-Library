@@ -1,11 +1,13 @@
 //! Colours, fonts and the two looks of the app.
 //!
-//! - **Ember** is the default: dark panels with an amber accent, a top
-//!   bar and a sidebar.
-//! - **Constellation**, **Aurora** and **Synthwave** are used while that
-//!   library background is equipped. They share one format: an animated
-//!   picture behind see-through "glass" panels, an icon rail instead of
-//!   the sidebar, and their own two-colour accent.
+//! Each look goes with a library background. They all share one format:
+//! an animated picture behind see-through "glass" panels, an icon rail down
+//! the left, and a two-colour accent.
+//!
+//! - **Constellation** (the default): a star map, ice-blue to violet.
+//! - **Ember**: drifting sparks in the dark, amber to orange.
+//! - **Aurora**: northern lights, green to violet.
+//! - **Synthwave**: a sunset over a neon grid, pink to orange.
 //!
 //! Every screen asks the [`Theme`] for its colours, so the same screen
 //! code draws both looks.
@@ -18,20 +20,21 @@ use gamelib::model::Source;
 /// What is painted behind everything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backdrop {
-    Plain,
     Constellation,
+    Ember,
     Aurora,
     Synthwave,
 }
 
 impl Backdrop {
-    /// The backdrop for an equipped library-background item.
-    pub fn from_item(item_id: Option<&str>) -> Backdrop {
+    /// The backdrop for a library-background item. Anything unrecognised
+    /// gets the default, Constellation.
+    pub fn from_item(item_id: &str) -> Backdrop {
         match item_id {
-            Some("bg_constellation") => Backdrop::Constellation,
-            Some("bg_aurora") => Backdrop::Aurora,
-            Some("bg_synthwave_grid") => Backdrop::Synthwave,
-            _ => Backdrop::Plain,
+            "bg_ember" => Backdrop::Ember,
+            "bg_aurora" => Backdrop::Aurora,
+            "bg_synthwave_grid" => Backdrop::Synthwave,
+            _ => Backdrop::Constellation,
         }
     }
 }
@@ -39,8 +42,6 @@ impl Backdrop {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Theme {
     pub backdrop: Backdrop,
-    /// True for the background looks: icon rail, no top bar.
-    pub rail: bool,
     pub bg: Color32,
     pub panel: Color32,
     pub panel_alt: Color32,
@@ -69,30 +70,29 @@ fn rgba(hex: u32, alpha: u8) -> Color32 {
 }
 
 impl Theme {
+    /// Sparks drifting up through warm darkness.
     pub fn ember() -> Theme {
         Theme {
-            backdrop: Backdrop::Plain,
-            rail: false,
-            bg: rgb(0x0f1115),
-            panel: rgb(0x161920),
-            panel_alt: rgb(0x1d212a),
-            border: rgb(0x2a2f3a),
-            text: rgb(0xe8eaf0),
-            muted: rgb(0x8b93a7),
+            backdrop: Backdrop::Ember,
+            bg: rgb(0x0e0a08),
+            panel: rgba(0x1c1410, 165),
+            panel_alt: rgba(0x2e2018, 190),
+            border: rgba(0xffb060, 42),
+            text: rgb(0xf6efe8),
+            muted: rgb(0xa8998a),
             accent: rgb(0xf5a524),
-            accent_end: rgb(0xf5a524),
+            accent_end: rgb(0xff6a3d),
             on_accent: rgb(0x1a1204),
-            chip_selected: rgb(0xe8eaf0),
+            chip_selected: rgb(0xf5a524),
             success: rgb(0x4cc38a),
             danger: rgb(0xef5f5f),
-            stardust: rgb(0xa99bff),
+            stardust: rgb(0xffc76a),
         }
     }
 
     pub fn constellation() -> Theme {
         Theme {
             backdrop: Backdrop::Constellation,
-            rail: true,
             bg: rgb(0x060914),
             panel: rgba(0x0e142a, 150),
             panel_alt: rgba(0x1c2648, 170),
@@ -126,7 +126,6 @@ impl Theme {
             success: rgb(0x5ff0b0),
             danger: rgb(0xff7b8a),
             stardust: rgb(0xb3a5ff),
-            ..Theme::constellation()
         }
     }
 
@@ -147,27 +146,23 @@ impl Theme {
             success: rgb(0x5fe0c0),
             danger: rgb(0xff8a7b),
             stardust: rgb(0x7de3ff),
-            ..Theme::constellation()
         }
     }
 
-    /// Every library background is a full look of its own, in the same
-    /// format: a picture behind glass panels, the icon rail, and its own
-    /// accent colours. With no background equipped, it's plain Ember.
     pub fn for_backdrop(backdrop: Backdrop) -> Theme {
         match backdrop {
-            Backdrop::Plain => Theme::ember(),
             Backdrop::Constellation => Theme::constellation(),
+            Backdrop::Ember => Theme::ember(),
             Backdrop::Aurora => Theme::aurora(),
             Backdrop::Synthwave => Theme::synthwave(),
         }
     }
 
-    /// The small line above "Library" in the background looks.
+    /// The small line above "Library".
     pub fn tagline(&self) -> &'static str {
         match self.backdrop {
-            Backdrop::Plain => "",
             Backdrop::Constellation => "Your universe",
+            Backdrop::Ember => "By the fire",
             Backdrop::Aurora => "Under the lights",
             Backdrop::Synthwave => "Night drive",
         }
@@ -239,13 +234,9 @@ impl Theme {
 
     /// The fill of text boxes.
     pub fn field_fill(&self) -> Color32 {
-        if self.rail {
-            // The background colour, slightly see-through.
-            let [r, g, b, _] = darken(self.bg, 0.15).to_array();
-            Color32::from_rgba_unmultiplied(r, g, b, 200)
-        } else {
-            rgb(0x12151b)
-        }
+        // The background colour, slightly see-through.
+        let [r, g, b, _] = darken(self.bg, 0.15).to_array();
+        Color32::from_rgba_unmultiplied(r, g, b, 200)
     }
 
     /// The panel colour with no see-through, for pop-up windows (which
@@ -266,7 +257,7 @@ impl Theme {
         )
     }
 
-    /// A rounded panel: glass in Constellation, solid in Ember.
+    /// A rounded glass panel.
     pub fn panel_frame(&self) -> egui::Frame {
         egui::Frame::new()
             .fill(self.panel)

@@ -128,16 +128,11 @@ impl GameLibApp {
             ui.set_width(ui.available_width());
             ui.label(paint::strong("Appearance", 17.0));
             ui.label(paint::muted(
-                "Library backgrounds come from the Shop.",
+                "Pick a library background. More can be bought in the Shop.",
                 &theme,
             ));
-            let mut choice: Option<Option<&'static str>> = None;
+            let mut choice: Option<&'static str> = None;
             ui.horizontal_wrapped(|ui| {
-                if paint::chip(ui, &theme, "None (Ember)", self.data.equipped.is_none())
-                    .clicked()
-                {
-                    choice = Some(None);
-                }
                 for item in shop::CATALOGUE
                     .iter()
                     .filter(|i| i.kind == ItemKind::LibraryBackground)
@@ -145,15 +140,13 @@ impl GameLibApp {
                     if !self.data.owned.iter().any(|id| id == item.id) {
                         continue;
                     }
-                    if paint::chip(ui, &theme, item.name, self.data.equipped == Some(item.id))
-                        .clicked()
-                    {
-                        choice = Some(Some(item.id));
+                    if paint::chip(ui, &theme, item.name, self.data.equipped == item.id).clicked() {
+                        choice = Some(item.id);
                     }
                 }
             });
             if let Some(choice) = choice {
-                self.check(self.db.equip_library_background(choice));
+                self.check(self.db.equip_library_background(Some(choice)));
             }
             let mut animate = self.animate;
             if ui

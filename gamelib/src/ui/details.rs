@@ -7,7 +7,7 @@ use gamelib::now;
 use gamelib::shop::FINISHED_COLLECTION;
 
 use super::dialogs::Dialog;
-use super::theme::{Theme, bold, regular, source_name};
+use super::theme::{Backdrop, Theme, bold, regular, source_name};
 use super::{GameLibApp, Screen, paint};
 use crate::text::{format_last_played, long_playtime, short_playtime};
 
@@ -85,11 +85,7 @@ impl GameLibApp {
                     let label = if running {
                         "RUNNING…"
                     } else if game.installed {
-                        if theme.rail {
-                            "▶  LAUNCH"
-                        } else {
-                            "▶  PLAY"
-                        }
+                        "▶  LAUNCH"
                     } else {
                         "NOT INSTALLED"
                     };
@@ -155,10 +151,9 @@ impl GameLibApp {
                     ui.set_width(chart_width);
                     ui.horizontal(|ui| {
                         ui.label(paint::strong("Weekly playtime", 16.0));
-                        let note = if theme.rail {
-                            "· plotted as a constellation"
-                        } else {
-                            "· last 12 weeks"
+                        let note = match theme.backdrop {
+                            Backdrop::Constellation => "· plotted as a constellation",
+                            _ => "· last 12 weeks",
                         };
                         ui.label(paint::muted(note, &theme));
                     });
@@ -235,7 +230,7 @@ impl GameLibApp {
                 Ok((reward, unlocked))
             });
             if let Some((reward, unlocked)) = self.check(result) {
-                self.status = format!("Marked as finished. +✦{reward}");
+                self.status = format!("Marked as finished. +{reward} Stardust");
                 if !unlocked.is_empty() {
                     self.status
                         .push_str(" Something new unlocked on your profile!");
@@ -305,8 +300,7 @@ impl GameLibApp {
     }
 }
 
-/// The weekly playtime chart: one point per week, joined by lines. In
-/// Constellation each point is a glowing star.
+/// The weekly playtime chart: one glowing point per week, joined by lines.
 pub fn weekly_chart(ui: &mut egui::Ui, theme: &Theme, weekly: &[u64], width: f32, height: f32) {
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let painter = ui.painter();
@@ -340,14 +334,12 @@ pub fn weekly_chart(ui: &mut egui::Ui, theme: &Theme, weekly: &[u64], width: f32
     let hover = response.hover_pos();
     for (i, point) in points.iter().enumerate() {
         let [r, g, b, _] = theme.accent.to_array();
-        if theme.rail {
-            paint::glow(
-                painter,
-                *point,
-                13.0,
-                Color32::from_rgba_unmultiplied(r, g, b, 80),
-            );
-        }
+        paint::glow(
+            painter,
+            *point,
+            13.0,
+            Color32::from_rgba_unmultiplied(r, g, b, 80),
+        );
         painter.circle_filled(*point, 4.5, theme.accent);
         // Show the week's number when the mouse is near its point.
         if hover.is_some_and(|pos| (pos.x - point.x).abs() < plot.width() / count as f32 / 2.0) {

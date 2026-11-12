@@ -59,16 +59,22 @@ const fn item(
 
 pub const NAME_CHANGE_ID: &str = "name_change";
 pub const FOUNDER_BADGE_ID: &str = "badge_founder";
+/// The library background used when none has been chosen.
+pub const DEFAULT_BACKGROUND_ID: &str = "bg_constellation";
+/// Items everyone owns without buying or earning them.
+pub const FREE_ITEMS: &[&str] = &[FOUNDER_BADGE_ID, DEFAULT_BACKGROUND_ID, "bg_ember"];
 
 /// Everything that exists. Built into the app: adding items means releasing
 /// a new version. **Never change an `id`**, because saved data refers to it.
 pub const CATALOGUE: &[ShopItem] = &[
+    // The two backgrounds everyone has from the start (see `FREE_ITEMS`).
     item(
-        "bg_constellation",
+        DEFAULT_BACKGROUND_ID,
         "Constellation",
         ItemKind::LibraryBackground,
-        Some(800),
+        None,
     ),
+    item("bg_ember", "Ember", ItemKind::LibraryBackground, None),
     item(
         "bg_aurora",
         "Aurora",
@@ -184,7 +190,7 @@ impl fmt::Display for ShopError {
             ShopError::NotEnoughStardust { balance, price } => {
                 write!(
                     f,
-                    "not enough Stardust: this costs ✦{price} and you have ✦{balance}"
+                    "not enough Stardust: this costs {price} and you have {balance}"
                 )
             }
             ShopError::NotOwned(name) => write!(f, "you don't own {name} yet"),
@@ -336,6 +342,19 @@ impl Db {
             params![item.id, now, how.as_str()],
         )?;
         Ok(added > 0)
+    }
+
+    /// Make sure the items everyone gets for free are owned. Safe to call
+    /// every time the app starts: it also hands out free items added in a
+    /// newer version. Returns how many were new.
+    pub fn grant_free_items(&self, now: i64) -> Result<usize> {
+        let mut granted = 0;
+        for item_id in FREE_ITEMS {
+            if self.grant_item(item_id, Acquired::Gift, now)? {
+                granted += 1;
+            }
+        }
+        Ok(granted)
     }
 
     /// Buy an item with Stardust. The check, the ledger row and the
@@ -584,34 +603,34 @@ mod tests {
     fn buying_reduces_the_balance_by_exactly_the_price() {
         let db = Db::open_in_memory().unwrap();
         give(&db, 1000);
-        let new_balance = db.purchase("bg_constellation", 5).unwrap();
-        assert_eq!(new_balance, 200);
-        assert_eq!(db.stardust_balance().unwrap(), 200);
-        assert!(db.owns_item("bg_constellation").unwrap());
+        let new_balance = db.purchase("bg_aurora", 5).unwrap();
+        assert_eq!(new_balance, 400);
+        assert_eq!(db.stardust_balance().unwrap(), 400);
+        assert!(db.owns_item("bg_aurora").unwrap());
 
         let newest = &db.stardust_ledger().unwrap()[0];
-        assert_eq!(newest.amount, -800);
+        assert_eq!(newest.amount, -600);
         assert_eq!(newest.reason, "purchase");
-        assert_eq!(newest.item_id.as_deref(), Some("bg_constellation"));
+        assert_eq!(newest.item_id.as_deref(), Some("bg_aurora"));
     }
 
     #[test]
     fn cannot_buy_with_too_little_stardust_and_nothing_changes() {
         let db = Db::open_in_memory().unwrap();
-        give(&db, 799);
+        give(&db, 599);
         let before = row_counts(&db);
 
-        let err = db.purchase("bg_constellation", 5).unwrap_err();
+        let err = db.purchase("bg_aurora", 5).unwrap_err();
         assert_eq!(
             shop_error(&err),
             &ShopError::NotEnoughStardust {
-                balance: 799,
-                price: 800
+                balance: 599,
+                price: 600
             }
         );
         assert_eq!(row_counts(&db), before, "both tables unchanged");
-        assert_eq!(db.stardust_balance().unwrap(), 799);
-        assert!(!db.owns_item("bg_constellation").unwrap());
+        assert_eq!(db.stardust_balance().unwrap(), 599);
+        assert!(!db.owns_item("bg_aurora").unwrap());
     }
 
     #[test]
@@ -717,17 +736,14 @@ mod tests {
         give(&db, 2000);
         assert!(db.equipped_library_background().unwrap().is_none());
 
-        let err = db
-            .equip_library_background(Some("bg_constellation"))
-            .unwrap_err();
+        let err = db.equip_library_background(Some("bg_aurora")).unwrap_err();
         assert!(matches!(shop_error(&err), ShopError::NotOwned(_)));
 
-        db.purchase("bg_constellation", 1).unwrap();
-        db.equip_library_background(Some("bg_constellation"))
-            .unwrap();
+        db.purchase("bg_aurora", 1).unwrap();
+        db.equip_library_background(Some("bg_aurora")).unwrap();
         assert_eq!(
             db.equipped_library_background().unwrap().unwrap().name,
-            "Constellation"
+            "Aurora"
         );
 
         db.purchase("badge_night_owl", 1).unwrap();
@@ -738,6 +754,25 @@ mod tests {
 
         db.equip_library_background(None).unwrap();
         assert!(db.equipped_library_background().unwrap().is_none());
+    }
+
+    #[test]
+    fn everyone_gets_the_free_items_once() {
+        let db = Db::open_in_memory().unwrap();
+        assert_eq!(db.grant_free_items(1).unwrap(), FREE_ITEMS.len());
+        assert_eq!(db.grant_free_items(2).unwrap(), 0, "not granted twice");
+        for item_id in FREE_ITEMS {
+            assert!(db.owns_item(item_id).unwrap(), "{item_id}");
+            assert_eq!(
+                find_item(item_id).unwrap().price,
+                None,
+                "free items aren't for sale"
+            );
+        }
+        // The default background can be equipped straight away.
+        db.equip_library_background(Some(DEFAULT_BACKGROUND_ID))
+            .unwrap();
+        assert_eq!(db.stardust_balance().unwrap(), 0);
     }
 
     #[test]

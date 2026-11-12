@@ -6,8 +6,7 @@
 //!
 //! How the files fit together:
 //! - `mod.rs` (this file): the app's state, loading data, talking to the
-//!   worker, and the frame around every screen (top bar, sidebar or icon
-//!   rail, status bar).
+//!   worker, and the frame around every screen (icon rail, status bar).
 //! - `theme.rs`: colours and fonts for each look.
 //! - `paint.rs`: drawing helpers (gradients, star map, covers, buttons).
 //! - `home.rs`, `library.rs`, `details.rs`, `stats.rs`, `profile.rs`,
@@ -29,7 +28,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use eframe::egui::{self, Color32, Rect, Sense, Stroke, vec2};
+use eframe::egui::{self, Color32, Sense, Stroke, vec2};
 use gamelib::db::{Db, GameQuery, SortBy, keys};
 use gamelib::friends::Friend;
 use gamelib::model::{Game, Source, Tag};
@@ -41,7 +40,7 @@ use gamelib::{now, paths};
 
 use self::dialogs::Dialog;
 use self::paint::{Icon, StarMap};
-use self::theme::{Backdrop, Theme, bold, regular, semibold};
+use self::theme::{Backdrop, Theme};
 use crate::text::{short_playtime, thousands};
 
 /// How long a shop preview lasts, in seconds.
@@ -109,8 +108,8 @@ pub struct Data {
     pub friends_at: Option<i64>,
     pub name_credits: u32,
     pub ledger: Vec<LedgerEntry>,
-    /// The equipped library background, if any.
-    pub equipped: Option<&'static str>,
+    /// The library background in use: the equipped one, or the default.
+    pub equipped: &'static str,
 }
 
 impl Data {
@@ -160,7 +159,10 @@ impl Data {
             friends_at: db.friends_updated_at()?,
             name_credits: db.name_change_credits()?,
             ledger: db.stardust_ledger()?,
-            equipped: db.equipped_library_background()?.map(|item| item.id),
+            equipped: db
+                .equipped_library_background()?
+                .map(|item| item.id)
+                .unwrap_or(gamelib::shop::DEFAULT_BACKGROUND_ID),
         })
     }
 
@@ -275,6 +277,7 @@ impl GameLibApp {
         db.recover_unfinished_sessions()?;
         db.profile(now())?;
         db.refresh_exe_installed()?;
+        db.grant_free_items(now())?;
         db.grant_earned_items(now())?;
 
         // GAMELIB_THEME=constellation (or aurora, synthwave, ember) shows a
@@ -283,7 +286,7 @@ impl GameLibApp {
             Ok("constellation") => Some(Backdrop::Constellation),
             Ok("aurora") => Some(Backdrop::Aurora),
             Ok("synthwave") => Some(Backdrop::Synthwave),
-            Ok("ember") => Some(Backdrop::Plain),
+            Ok("ember") => Some(Backdrop::Ember),
             _ => None,
         };
         let settings = SettingsInputs {
@@ -298,7 +301,7 @@ impl GameLibApp {
             settings,
             db,
             worker,
-            theme: Theme::ember(),
+            theme: Theme::constellation(),
             theme_applied: false,
             stars: StarMap::new(),
             screen,
@@ -417,7 +420,7 @@ impl GameLibApp {
                     self.job_done();
                     self.running.insert(game_id);
                     self.status = if daily_stardust > 0 {
-                        format!("Starting… First game of the day: +✦{daily_stardust}")
+                        format!("Starting… First game of the day: +{daily_stardust} Stardust")
                     } else {
                         "Starting…".to_string()
                     };
@@ -439,7 +442,8 @@ impl GameLibApp {
                     self.status =
                         format!("Played {} for {length}.", self.title_of(summary.game_id));
                     if summary.stardust > 0 {
-                        self.status.push_str(&format!(" +✦{}", summary.stardust));
+                        self.status
+                            .push_str(&format!(" +{} Stardust", summary.stardust));
                     }
                     if !unlocked.is_empty() {
                         self.status
@@ -488,7 +492,7 @@ impl GameLibApp {
 
     // --- The frame around the screens ------------------------------------
 
-    /// The search box, shared by the top bar and the Constellation header.
+    /// The search box in the library header.
     fn search_box(&mut self, ui: &mut egui::Ui, width: f32) {
         let hint = self.theme.search_hint();
         let edit = egui::TextEdit::singleline(&mut self.search)
@@ -529,11 +533,7 @@ impl GameLibApp {
     /// The Stardust balance as a clickable pill that opens the shop.
     fn stardust_pill(&mut self, ui: &mut egui::Ui) {
         let theme = self.theme;
-        let text = egui::RichText::new(format!("✦ {}", thousands(self.data.stardust)))
-            .font(semibold(15.0))
-            .color(theme.stardust);
-        if ui
-            .button(text)
+        if paint::stardust_button(ui, &theme, &thousands(self.data.stardust), 15.0)
             .on_hover_text("Stardust: earned by playing, spent in the Shop")
             .clicked()
         {
@@ -541,276 +541,7 @@ impl GameLibApp {
         }
     }
 
-    /// Ember's top bar: logo, navigation, search, buttons, avatar.
-    fn top_bar(&mut self, ui: &mut egui::Ui) {
-        let theme = self.theme;
-        ui.horizontal_centered(|ui| {
-            // Logo.
-            let (logo, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
-            paint::gradient(
-                ui.painter(),
-                logo,
-                7.0,
-                theme.accent,
-                Color32::from_rgb(0xe0, 0x6a, 0x1a),
-                vec2(0.4, 1.0),
-            );
-            ui.label(egui::RichText::new("GameLib").font(bold(19.0)));
-            ui.add_space(60.0);
-
-            for (screen, label) in [
-                (Screen::Home, "Home"),
-                (Screen::Library, "Library"),
-                (Screen::Stats, "Stats"),
-                (Screen::Shop, "Shop"),
-            ] {
-                let selected = self.screen == screen
-                    || (screen == Screen::Library && matches!(self.screen, Screen::Details(_)));
-                let colour = if selected { theme.text } else { theme.muted };
-                let text = egui::RichText::new(label)
-                    .font(semibold(15.0))
-                    .color(colour);
-                let button = egui::Button::new(text)
-                    .fill(if selected {
-                        theme.panel_alt
-                    } else {
-                        Color32::TRANSPARENT
-                    })
-                    .stroke(Stroke::NONE);
-                if ui.add(button).clicked() {
-                    self.go(screen);
-                }
-            }
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Avatar, with a ring in the accent colour.
-                let (rect, response) = ui.allocate_exact_size(vec2(46.0, 46.0), Sense::click());
-                ui.painter()
-                    .circle_stroke(rect.center(), 22.0, Stroke::new(2.0, theme.accent));
-                paint::avatar(
-                    ui,
-                    rect.center(),
-                    19.0,
-                    &self.data.profile.display_name,
-                    self.data.profile.avatar_path.as_deref(),
-                    &theme,
-                );
-                if response.on_hover_text("Profile").clicked() {
-                    self.go(Screen::Profile);
-                }
-                self.stardust_pill(ui);
-                self.add_game_button(ui);
-                self.scan_button(ui);
-                let width = (ui.available_width() - 24.0).clamp(140.0, 420.0);
-                self.search_box(ui, width);
-            });
-        });
-    }
-
-    /// One row of Ember's sidebar: a label, an optional colour dot, and a
-    /// count on the right.
-    fn side_row(
-        ui: &mut egui::Ui,
-        theme: &Theme,
-        label: &str,
-        count: Option<usize>,
-        selected: bool,
-        dot: Option<Color32>,
-    ) -> egui::Response {
-        let (rect, response) =
-            ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click());
-        let painter = ui.painter();
-        if selected || response.hovered() {
-            let fill = if selected {
-                theme.panel_alt
-            } else {
-                theme.panel_alt.gamma_multiply(0.5)
-            };
-            painter.rect_filled(rect.shrink2(vec2(8.0, 1.0)), 8.0, fill);
-        }
-        let mut x = rect.left() + 22.0;
-        if let Some(colour) = dot {
-            painter.rect_filled(
-                Rect::from_center_size(egui::pos2(x + 4.0, rect.center().y), vec2(9.0, 9.0)),
-                2.5,
-                colour,
-            );
-            x += 18.0;
-        }
-        let font = if selected {
-            semibold(15.0)
-        } else {
-            regular(15.0)
-        };
-        painter.text(
-            egui::pos2(x, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            label,
-            font,
-            theme.text,
-        );
-        if let Some(count) = count {
-            painter.text(
-                egui::pos2(rect.right() - 22.0, rect.center().y),
-                egui::Align2::RIGHT_CENTER,
-                count.to_string(),
-                regular(14.0),
-                theme.muted,
-            );
-        }
-        response.on_hover_cursor(egui::CursorIcon::PointingHand)
-    }
-
-    fn sidebar(&mut self, ui: &mut egui::Ui) {
-        let theme = self.theme;
-        let in_library = matches!(self.screen, Screen::Library);
-        let heading = |ui: &mut egui::Ui, text: &str| {
-            ui.add_space(14.0);
-            ui.horizontal(|ui| {
-                ui.add_space(22.0);
-                ui.label(paint::caps(text, 11.5, theme.muted));
-            });
-            ui.add_space(2.0);
-        };
-        let visible = &self.data.visible;
-        let mut chosen: Option<Filter> = None;
-        let mut new_collection = false;
-        let settings_height = 52.0;
-
-        ui.spacing_mut().item_spacing.y = 0.0;
-        egui::ScrollArea::vertical()
-            .max_height(ui.available_height() - settings_height)
-            .auto_shrink(false)
-            .show(ui, |ui| {
-                heading(ui, "Library");
-                let rows = [
-                    (Filter::All, "All games", visible.len()),
-                    (
-                        Filter::Favourites,
-                        "Favourites",
-                        visible.iter().filter(|g| g.favourite).count(),
-                    ),
-                    (
-                        Filter::RecentlyPlayed,
-                        "Recently played",
-                        visible.iter().filter(|g| g.last_played.is_some()).count(),
-                    ),
-                    (
-                        Filter::Installed,
-                        "Installed",
-                        visible.iter().filter(|g| g.installed).count(),
-                    ),
-                    (Filter::Hidden, "Hidden", self.data.hidden_count),
-                ];
-                for (filter, label, count) in rows {
-                    if filter == Filter::Hidden && count == 0 {
-                        continue;
-                    }
-                    let selected = in_library && self.filter == filter;
-                    if Self::side_row(ui, &theme, label, Some(count), selected, None).clicked() {
-                        chosen = Some(filter);
-                    }
-                }
-
-                heading(ui, "Collections");
-                for (tag, count) in self.data.collections() {
-                    let selected = in_library && self.filter == Filter::Tag(tag.id);
-                    if Self::side_row(ui, &theme, &tag.name, Some(*count as usize), selected, None)
-                        .clicked()
-                    {
-                        chosen = Some(Filter::Tag(tag.id));
-                    }
-                }
-                let (rect, response) =
-                    ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click());
-                ui.painter().text(
-                    egui::pos2(rect.left() + 22.0, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    "+ New collection",
-                    regular(15.0),
-                    if response.hovered() {
-                        theme.text
-                    } else {
-                        theme.muted
-                    },
-                );
-                new_collection = response
-                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .clicked();
-
-                let plain_tags: Vec<_> = self
-                    .data
-                    .tags
-                    .iter()
-                    .filter(|(t, _)| !t.is_collection)
-                    .collect();
-                if !plain_tags.is_empty() {
-                    heading(ui, "Tags");
-                    for (tag, count) in plain_tags {
-                        let selected = in_library && self.filter == Filter::Tag(tag.id);
-                        if Self::side_row(
-                            ui,
-                            &theme,
-                            &tag.name,
-                            Some(*count as usize),
-                            selected,
-                            None,
-                        )
-                        .clicked()
-                        {
-                            chosen = Some(Filter::Tag(tag.id));
-                        }
-                    }
-                }
-
-                heading(ui, "Sources");
-                for source in Source::ALL {
-                    let count = visible.iter().filter(|g| g.source == source).count();
-                    if count == 0 {
-                        continue;
-                    }
-                    let selected = in_library && self.filter == Filter::Source(source);
-                    let dot = Some(theme::source_colour(source));
-                    if Self::side_row(
-                        ui,
-                        &theme,
-                        theme::source_name(source),
-                        Some(count),
-                        selected,
-                        dot,
-                    )
-                    .clicked()
-                    {
-                        chosen = Some(Filter::Source(source));
-                    }
-                }
-                ui.add_space(12.0);
-            });
-
-        ui.add_space(8.0);
-        if Self::side_row(
-            ui,
-            &theme,
-            "⚙  Settings",
-            None,
-            self.screen == Screen::Settings,
-            None,
-        )
-        .clicked()
-        {
-            self.go(Screen::Settings);
-        }
-        if let Some(filter) = chosen {
-            self.show_filter(filter);
-        }
-        if new_collection {
-            self.dialog = Dialog::NewCollection {
-                name: String::new(),
-            };
-        }
-    }
-
-    /// Constellation's icon rail: a glass strip with the profile orb on
+    /// The icon rail: a glass strip with the profile orb on
     /// top and one icon per screen.
     fn rail(&mut self, ui: &mut egui::Ui) {
         let theme = self.theme;
@@ -976,7 +707,7 @@ impl eframe::App for GameLibApp {
 
         // Background first, then the panels on top of it. An animated
         // background needs the window redrawn about 30 times a second.
-        let animating = self.animate && theme.backdrop != Backdrop::Plain;
+        let animating = self.animate;
         self.anim_time = self.animate.then_some(time);
         paint::backdrop(
             ui.painter(),
@@ -994,30 +725,14 @@ impl eframe::App for GameLibApp {
             .inner_margin(egui::Margin::symmetric(18, 8));
         egui::Panel::bottom("status_bar")
             .frame(bar)
-            .show_separator_line(!theme.rail)
+            .show_separator_line(false)
             .show(ui, |ui| self.status_bar(ui));
-        if theme.rail {
-            egui::Panel::left("rail")
-                .exact_size(98.0)
-                .resizable(false)
-                .frame(egui::Frame::NONE)
-                .show_separator_line(false)
-                .show(ui, |ui| self.rail(ui));
-        } else {
-            egui::Panel::top("top_bar")
-                .exact_size(64.0)
-                .frame(
-                    egui::Frame::new()
-                        .fill(theme.panel)
-                        .inner_margin(egui::Margin::symmetric(20, 0)),
-                )
-                .show(ui, |ui| self.top_bar(ui));
-            egui::Panel::left("sidebar")
-                .exact_size(264.0)
-                .resizable(false)
-                .frame(egui::Frame::new().fill(theme.panel))
-                .show(ui, |ui| self.sidebar(ui));
-        }
+        egui::Panel::left("rail")
+            .exact_size(98.0)
+            .resizable(false)
+            .frame(egui::Frame::NONE)
+            .show_separator_line(false)
+            .show(ui, |ui| self.rail(ui));
 
         // The profile page runs edge to edge (its banner touches the
         // sides); every other screen gets a margin. The margin is inside

@@ -5,16 +5,15 @@ and hand-added games, with launching, playtime tracking, cover art, stats,
 a local profile, Steam friends, and the Stardust shop.
 
 The window (`src/ui/`) follows the designs in
-[`../plan/gamelib plan/`](../plan/gamelib%20plan/00%20Home.md). **Ember**
-is the default look: dark panels, amber accent, top bar and sidebar.
+[`../plan/gamelib plan/`](../plan/gamelib%20plan/00%20Home.md). Every look
+shares one format: an animated background behind glass panels, an icon
+rail down the left, and a two-colour accent. The look follows the library
+background you pick in Settings or the Shop:
 
-Equipping a library background from the Shop switches the whole app to
-that background's look. All three share one format (an animated picture
-behind glass panels, an icon rail, and a two-colour accent):
-
-- **Constellation**: twinkling star map with shooting stars.
-- **Aurora**: drifting northern lights.
-- **Synthwave**: a striped sunset over a rolling neon grid.
+- **Constellation** (the default, free): twinkling star map with shooting stars.
+- **Ember** (free): sparks drifting up through warm darkness.
+- **Aurora** (Shop): drifting northern lights.
+- **Synthwave** (Shop): a striped sunset over a rolling neon grid.
 
 The animation can be turned off in Settings.
 
@@ -38,14 +37,14 @@ The first build takes several minutes; later ones are quick.
 
 In the window: **Scan** finds launcher games, **+ Add game** adds one by
 hand. Click a game to open its page; hover a cover and press the play
-button to start it straight from the grid. Home, Library, Stats, Shop,
-Profile and Settings are in the top bar and sidebar (or the icon rail).
+button to start it straight from the grid. The icons down the left are
+Profile, Home, Library, Stats, Shop and Settings.
 
 To see a look without owning it, set the `GAMELIB_THEME` environment
-variable to `constellation`, `aurora`, `synthwave` or `ember`:
+variable to `constellation`, `ember`, `aurora` or `synthwave`:
 
 ```powershell
-$env:GAMELIB_THEME = "constellation"; cargo run
+$env:GAMELIB_THEME = "aurora"; cargo run
 ```
 
 Data is kept in `%APPDATA%\gamelib\` (`library.db`, `covers\`,

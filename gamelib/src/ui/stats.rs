@@ -40,11 +40,9 @@ impl GameLibApp {
 
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Stats").font(bold(32.0)));
-            if theme.rail {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    self.stardust_pill(ui);
-                });
-            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.stardust_pill(ui);
+            });
         });
         ui.add_space(10.0);
         paint::stat_row(

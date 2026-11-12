@@ -2,9 +2,10 @@
 
 use eframe::egui::{self, Color32, Rect, Sense, Stroke, vec2};
 use gamelib::db::SortBy;
-use gamelib::model::Game;
+use gamelib::model::{Game, Source};
 
-use super::theme::{Theme, bold, regular, semibold};
+use super::dialogs::Dialog;
+use super::theme::{Theme, bold, regular, semibold, source_name};
 use super::{Filter, GameLibApp, Screen, paint};
 use crate::text::played_label;
 
@@ -27,16 +28,13 @@ impl GameLibApp {
     pub fn library_screen(&mut self, ui: &mut egui::Ui) {
         let theme = self.theme;
 
-        // Header. In Constellation there is no top bar, so the search box
-        // and buttons live here.
+        // Header: title on the left; search and the main buttons on the right.
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
-                if theme.rail {
-                    ui.label(
-                        paint::caps(theme.tagline(), 12.5, theme.accent).extra_letter_spacing(3.0),
-                    );
-                }
+                ui.label(
+                    paint::caps(theme.tagline(), 12.5, theme.accent).extra_letter_spacing(3.0),
+                );
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
                     ui.label(egui::RichText::new("Library").font(bold(32.0)));
@@ -45,20 +43,19 @@ impl GameLibApp {
                     ui.label(paint::muted(format!("{count} {noun}"), &theme).size(19.0));
                 });
             });
-            if theme.rail {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    self.add_game_button(ui);
-                    self.scan_button(ui);
-                    self.stardust_pill(ui);
-                    let width = (ui.available_width() - 24.0).clamp(140.0, 420.0);
-                    self.search_box(ui, width);
-                });
-            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.add_game_button(ui);
+                self.scan_button(ui);
+                self.stardust_pill(ui);
+                let width = (ui.available_width() - 24.0).clamp(140.0, 420.0);
+                self.search_box(ui, width);
+            });
         });
         ui.add_space(10.0);
 
         // Filter chips on the left, sort on the right.
         let mut chosen: Option<Filter> = None;
+        let mut new_collection = false;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
             let mut chips: Vec<(Filter, String)> = vec![
@@ -71,11 +68,83 @@ impl GameLibApp {
                     .collections()
                     .map(|(tag, _)| (Filter::Tag(tag.id), tag.name.clone())),
             );
+            // A filter picked from "More" that has no chip of its own gets
+            // a chip while it is in use, so you can see what's applied.
+            if !chips.iter().any(|(filter, _)| *filter == self.filter) {
+                let label = match self.filter {
+                    Filter::RecentlyPlayed => "Recently played".to_string(),
+                    Filter::Hidden => "Hidden".to_string(),
+                    Filter::Source(source) => source_name(source).to_string(),
+                    Filter::Tag(id) => self
+                        .data
+                        .tags
+                        .iter()
+                        .find(|(tag, _)| tag.id == id)
+                        .map(|(tag, _)| tag.name.clone())
+                        .unwrap_or_else(|| "Tag".to_string()),
+                    _ => String::new(),
+                };
+                chips.push((self.filter, label));
+            }
             for (filter, label) in chips {
                 if paint::chip(ui, &theme, &label, self.filter == filter).clicked() {
                     chosen = Some(filter);
                 }
             }
+            // Everything else you can filter by, and making a collection.
+            ui.menu_button("More ▾", |ui| {
+                ui.set_min_width(210.0);
+                let visible = &self.data.visible;
+                let mut row = |ui: &mut egui::Ui, filter: Filter, label: String| {
+                    if ui.selectable_label(self.filter == filter, label).clicked() {
+                        chosen = Some(filter);
+                        ui.close();
+                    }
+                };
+                let recent = visible.iter().filter(|g| g.last_played.is_some()).count();
+                row(
+                    ui,
+                    Filter::RecentlyPlayed,
+                    format!("Recently played ({recent})"),
+                );
+                if self.data.hidden_count > 0 {
+                    row(
+                        ui,
+                        Filter::Hidden,
+                        format!("Hidden ({})", self.data.hidden_count),
+                    );
+                }
+                ui.separator();
+                ui.label(paint::caps("Sources", 11.0, theme.muted));
+                for source in Source::ALL {
+                    let count = visible.iter().filter(|g| g.source == source).count();
+                    if count > 0 {
+                        row(
+                            ui,
+                            Filter::Source(source),
+                            format!("{} ({count})", source_name(source)),
+                        );
+                    }
+                }
+                let tags: Vec<_> = self
+                    .data
+                    .tags
+                    .iter()
+                    .filter(|(t, _)| !t.is_collection)
+                    .collect();
+                if !tags.is_empty() {
+                    ui.separator();
+                    ui.label(paint::caps("Tags", 11.0, theme.muted));
+                    for (tag, count) in tags {
+                        row(ui, Filter::Tag(tag.id), format!("{} ({count})", tag.name));
+                    }
+                }
+                ui.separator();
+                if ui.button("+ New collection…").clicked() {
+                    new_collection = true;
+                    ui.close();
+                }
+            });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let before = self.sort;
                 egui::ComboBox::from_id_salt("sort")
@@ -95,6 +164,11 @@ impl GameLibApp {
         });
         if let Some(filter) = chosen {
             self.show_filter(filter);
+        }
+        if new_collection {
+            self.dialog = Dialog::NewCollection {
+                name: String::new(),
+            };
         }
         ui.add_space(16.0);
 

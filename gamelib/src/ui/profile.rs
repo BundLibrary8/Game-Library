@@ -99,7 +99,7 @@ impl GameLibApp {
                     for badge in &self.data.badges {
                         let name = shop::find_item(badge).map(|item| item.name).unwrap_or("?");
                         let (colour, _) = paint::item_colours(badge);
-                        paint::badge_pill(ui, &format!("✦ {name}"), colour);
+                        paint::badge_pill(ui, name, colour);
                     }
                 });
                 // "Playing Ember Road", from the playtime tracker.

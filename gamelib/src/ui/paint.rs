@@ -237,6 +237,37 @@ impl StarMap {
         }
     }
 
+    /// Paint the star positions as sparks rising from the bottom of `rect`:
+    /// each one drifts up, sways a little, flickers, and fades as it climbs.
+    pub fn paint_sparks(&self, painter: &egui::Painter, rect: Rect, time: f32) {
+        // Every other star is enough; a sky full of sparks is too busy.
+        for star in self.stars.iter().step_by(2) {
+            let speed = 0.012 + 0.03 * star.brightness;
+            // How far up it has got: 0.0 at the bottom, 1.0 at the top.
+            let climb = (star.y + time * speed).rem_euclid(1.0);
+            let sway = 0.012 * (time * 0.7 + star.phase).sin();
+            let centre = pos2(
+                rect.left() + (star.x + sway) * rect.width(),
+                rect.bottom() - climb * rect.height(),
+            );
+            let flicker = 0.7 + 0.3 * (time * 3.1 + star.phase * 5.0).sin();
+            let alpha = ((1.0 - climb).powf(1.4) * flicker * 230.0) as u8;
+            if star.size > 1.3 {
+                glow(
+                    painter,
+                    centre,
+                    star.size * 5.0,
+                    Color32::from_rgba_unmultiplied(255, 140, 50, alpha / 3),
+                );
+            }
+            painter.circle_filled(
+                centre,
+                star.size,
+                Color32::from_rgba_unmultiplied(255, 180, 90, alpha),
+            );
+        }
+    }
+
     /// Paint just the stars. `strength` (0.0 to 1.0) dims them, for
     /// backgrounds where they are only a detail.
     pub fn paint_stars(
@@ -275,11 +306,44 @@ pub fn backdrop(
 ) {
     painter.rect_filled(rect, 0.0, theme.bg);
     match theme.backdrop {
-        Backdrop::Plain => {}
+        Backdrop::Ember => embers(painter, rect, stars, time),
         Backdrop::Constellation => stars.paint(painter, rect, time),
         Backdrop::Aurora => aurora(painter, rect, stars, time),
         Backdrop::Synthwave => synthwave(painter, rect, stars, time),
     }
+}
+
+/// Warm glows low down, with sparks drifting up out of them.
+fn embers(painter: &egui::Painter, rect: Rect, stars: &StarMap, time: Option<f64>) {
+    let t = time.unwrap_or(0.0) as f32;
+    let size = rect.width().max(rect.height());
+    let at = |x: f32, y: f32| {
+        pos2(
+            rect.left() + x * rect.width(),
+            rect.top() + y * rect.height(),
+        )
+    };
+    // The fire's glow breathes slowly.
+    let breathe = 1.0 + 0.08 * (t * 0.5).sin();
+    glow(
+        painter,
+        at(0.15, 1.05),
+        size * 0.6 * breathe,
+        Color32::from_rgba_unmultiplied(230, 110, 30, 85),
+    );
+    glow(
+        painter,
+        at(0.9, 1.1),
+        size * 0.55 / breathe,
+        Color32::from_rgba_unmultiplied(200, 60, 40, 70),
+    );
+    glow(
+        painter,
+        at(0.55, -0.1),
+        size * 0.45,
+        Color32::from_rgba_unmultiplied(120, 60, 30, 40),
+    );
+    stars.paint_sparks(painter, rect, t);
 }
 
 /// One curtain of the northern lights: a wavy band that is brightest along
@@ -692,14 +756,7 @@ pub fn avatar(
                 .paint_at(ui, rect);
         }
         None => {
-            let (from, to) = if theme.rail {
-                (theme.accent, theme.accent_end)
-            } else {
-                (
-                    lighten(theme.accent, 0.1),
-                    Color32::from_rgb(0xe0, 0x5a, 0x1a),
-                )
-            };
+            let (from, to) = (theme.accent, theme.accent_end);
             gradient(painter, rect, radius, from, to, vec2(0.6, 1.0));
             let initial = name
                 .chars()
@@ -765,8 +822,8 @@ pub fn accent_button(
             0.0
         };
         let fade = if enabled { 1.0 } else { 0.35 };
-        let radius = if theme.rail { size.y / 2.0 } else { 9.0 };
-        if theme.rail && enabled {
+        let radius = size.y / 2.0;
+        if enabled {
             // A soft glow under the button.
             let [r, g, b, _] = theme.accent.to_array();
             glow(
@@ -846,6 +903,68 @@ pub fn badge_pill(ui: &mut Ui, text: &str, colour: Color32) -> Response {
     response
 }
 
+/// A Stardust amount: the four-pointed star, then the text. The star is
+/// drawn rather than typed, because not every font has that symbol.
+pub fn stardust(ui: &mut Ui, theme: &Theme, text: &str, size: f32) -> Response {
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_string(), bold(size), theme.stardust);
+    let star = size * 0.5;
+    let total = vec2(star * 2.0 + size * 0.35 + galley.size().x, galley.size().y);
+    let (rect, response) = ui.allocate_exact_size(total, Sense::hover());
+    if ui.is_rect_visible(rect) {
+        star4(
+            ui.painter(),
+            pos2(rect.left() + star, rect.center().y),
+            star,
+            theme.stardust,
+        );
+        ui.painter().galley(
+            pos2(rect.left() + star * 2.0 + size * 0.35, rect.top()),
+            galley,
+            theme.stardust,
+        );
+    }
+    response
+}
+
+/// A button showing a Stardust amount (the balance, or a price).
+pub fn stardust_button(ui: &mut Ui, theme: &Theme, text: &str, size: f32) -> Response {
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_string(), bold(size), theme.stardust);
+    let star = size * 0.5;
+    let padding = vec2(13.0, 8.0);
+    let inner = vec2(star * 2.0 + size * 0.35 + galley.size().x, galley.size().y);
+    let (rect, response) = ui.allocate_exact_size(inner + 2.0 * padding, Sense::click());
+    if ui.is_rect_visible(rect) {
+        let enabled = ui.is_enabled();
+        let fade = if enabled { 1.0 } else { 0.4 };
+        let fill = if response.hovered() && enabled {
+            lighten(theme.panel_alt, 0.08)
+        } else {
+            theme.panel_alt
+        };
+        let painter = ui.painter();
+        painter.rect_filled(rect, 9.0, fill);
+        painter.rect_stroke(
+            rect,
+            9.0,
+            Stroke::new(1.0, theme.border),
+            egui::StrokeKind::Inside,
+        );
+        let colour = theme.stardust.gamma_multiply(fade);
+        let left = rect.left() + padding.x;
+        star4(painter, pos2(left + star, rect.center().y), star, colour);
+        painter.galley(
+            pos2(left + star * 2.0 + size * 0.35, rect.top() + padding.y),
+            galley,
+            colour,
+        );
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 /// Small, spaced-out capitals: "TOTAL PLAYTIME", "COLLECTIONS".
 pub fn caps(text: &str, size: f32, colour: Color32) -> egui::RichText {
     egui::RichText::new(text.to_uppercase())
@@ -914,7 +1033,7 @@ pub fn bar(ui: &mut Ui, theme: &Theme, fraction: f32, colour: Color32, width: f3
 
 // --- Icons ---------------------------------------------------------------
 
-/// The icons on the Constellation icon rail. They are drawn from simple
+/// The icons on the icon rail. They are drawn from simple
 /// shapes rather than taken from a font, so they look the same everywhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
