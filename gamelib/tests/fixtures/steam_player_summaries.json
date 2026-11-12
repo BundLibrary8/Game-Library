@@ -1,0 +1,29 @@
+{
+  "response": {
+    "players": [
+      {
+        "steamid": "76561198000000001",
+        "communityvisibilitystate": 3,
+        "personaname": "Zed",
+        "avatar": "https://avatars.example/zed.jpg",
+        "avatarmedium": "https://avatars.example/zed_medium.jpg",
+        "avatarfull": "https://avatars.example/zed_full.jpg",
+        "personastate": 0,
+        "lastlogoff": 1700000000
+      },
+      {
+        "steamid": "76561198000000002",
+        "personaname": "Ada",
+        "avatarmedium": "https://avatars.example/ada_medium.jpg",
+        "personastate": 1,
+        "gameextrainfo": "Ember Road",
+        "gameid": "12345"
+      },
+      {
+        "steamid": "76561198000000003",
+        "personaname": "bob",
+        "personastate": 3
+      }
+    ]
+  }
+}
