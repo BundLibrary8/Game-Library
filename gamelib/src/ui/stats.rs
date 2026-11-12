@@ -1,93 +1,149 @@
 //! The stats screen.
 
-use eframe::egui;
-use gamelib::db::GameQuery;
+use eframe::egui::{self, vec2};
+use gamelib::model::Source;
 use gamelib::now;
 
-use super::{GameLibApp, source_name, stat_tile};
-use crate::text::format_duration;
+use super::details::weekly_chart;
+use super::theme::{bold, source_colour, source_name};
+use super::{GameLibApp, paint};
+use crate::text::short_playtime;
 
 const SECS_PER_DAY: i64 = 86_400;
 
 impl GameLibApp {
     pub fn stats_screen(&mut self, ui: &mut egui::Ui) {
+        let theme = self.theme;
         let loaded = (|| -> anyhow::Result<_> {
-            let stats = self.db.library_stats()?;
-            let top = self.db.top_played(10)?;
-            let by_source = self.db.playtime_by_source()?;
             let now = now();
-            let since = |days: i64| -> anyhow::Result<u64> {
-                let rows = self
-                    .db
-                    .playtime_by_day(now - days * SECS_PER_DAY, now + 1)?;
-                Ok(rows.iter().map(|d| d.secs).sum())
-            };
-            let never_played = self
-                .db
-                .query_games(&GameQuery::default())?
-                .iter()
-                .filter(|g| g.playtime_secs == 0)
-                .count();
-            Ok((stats, top, by_source, since(7)?, since(30)?, never_played))
+            let month = self.db.playtime_by_day(now - 30 * SECS_PER_DAY, now + 1)?;
+            Ok((
+                self.db.top_played(10)?,
+                self.db.weekly_playtime(None, now, 12)?,
+                month.iter().map(|d| d.secs).sum::<u64>(),
+            ))
         })();
-        let (stats, top, by_source, last_7, last_30, never_played) = match loaded {
+        let (top, weekly, last_30) = match loaded {
             Ok(values) => values,
             Err(err) => {
-                ui.colored_label(ui.visuals().error_fg_color, format!("{err:#}"));
+                ui.colored_label(theme.danger, format!("{err:#}"));
                 return;
             }
         };
+        let stats = self.data.stats.clone();
+        let never_played = self
+            .data
+            .visible
+            .iter()
+            .filter(|g| g.playtime_secs == 0)
+            .count();
 
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            ui.heading("Stats");
-            ui.add_space(8.0);
-            ui.horizontal_wrapped(|ui| {
-                stat_tile(ui, &format_duration(stats.total_playtime_secs), "total playtime");
-                stat_tile(ui, &stats.game_count.to_string(), "games");
-                stat_tile(ui, &format_duration(last_7), "last 7 days");
-                stat_tile(ui, &format_duration(last_30), "last 30 days");
-                stat_tile(ui, &stats.finished_count.to_string(), "finished");
-                stat_tile(ui, &never_played.to_string(), "never played");
-            });
-
-            ui.add_space(16.0);
-            ui.strong("Most played");
-            ui.add_space(4.0);
-            if top.is_empty() {
-                ui.weak("Nothing played yet. Launch a game from the library and it will show up here.");
-            }
-            let longest = top.first().map(|g| g.playtime_secs).unwrap_or(1).max(1);
-            egui::Grid::new("top_played").num_columns(3).spacing([12.0, 6.0]).show(ui, |ui| {
-                for (rank, game) in top.iter().enumerate() {
-                    ui.weak(format!("{}.", rank + 1));
-                    ui.label(&game.title);
-                    let fraction = game.playtime_secs as f32 / longest as f32;
-                    ui.add(
-                        egui::ProgressBar::new(fraction)
-                            .desired_width(320.0)
-                            .text(format_duration(game.playtime_secs)),
-                    );
-                    ui.end_row();
-                }
-            });
-
-            if !by_source.is_empty() {
-                ui.add_space(16.0);
-                ui.strong("Playtime by source");
-                ui.add_space(4.0);
-                let total = stats.total_playtime_secs.max(1);
-                egui::Grid::new("by_source").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                    for (source, secs) in by_source {
-                        ui.label(source_name(source));
-                        ui.add(
-                            egui::ProgressBar::new(secs as f32 / total as f32)
-                                .desired_width(320.0)
-                                .text(format_duration(secs)),
-                        );
-                        ui.end_row();
-                    }
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Stats").font(bold(32.0)));
+            if theme.rail {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    self.stardust_pill(ui);
                 });
             }
         });
+        ui.add_space(10.0);
+        paint::stat_row(
+            ui,
+            &theme,
+            &[
+                ("Total playtime", short_playtime(stats.total_playtime_secs)),
+                ("Library size", format!("{} games", stats.game_count)),
+                ("Last 30 days", short_playtime(last_30)),
+                ("Never played", never_played.to_string()),
+            ],
+        );
+        ui.add_space(18.0);
+
+        let gap = 18.0;
+        let half = ((ui.available_width() - gap) / 2.0).floor();
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            // Most played.
+            paint::panel(ui, theme.panel_frame(), |ui| {
+                ui.set_width(half - 38.0);
+                ui.set_min_height(330.0);
+                ui.label(paint::strong("Most played", 17.0));
+                ui.add_space(6.0);
+                if top.is_empty() {
+                    ui.label(paint::muted(
+                        "Nothing played yet. Launch a game and it will show up here.",
+                        &theme,
+                    ));
+                }
+                let longest = top.first().map(|g| g.playtime_secs).unwrap_or(1).max(1);
+                let bar_width = (half - 38.0 - 260.0).max(80.0);
+                for game in &top {
+                    ui.horizontal(|ui| {
+                        name_cell(ui, &game.title, 170.0);
+                        let fraction = game.playtime_secs as f32 / longest as f32;
+                        paint::bar(ui, &theme, fraction, theme.accent, bar_width);
+                        ui.label(paint::muted(short_playtime(game.playtime_secs), &theme));
+                    });
+                }
+            });
+
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = gap;
+                theme.panel_frame().show(ui, |ui| {
+                    ui.set_width(half - 38.0);
+                    ui.horizontal(|ui| {
+                        ui.label(paint::strong("Weekly playtime", 17.0));
+                        ui.label(paint::muted("· all games, last 12 weeks", &theme));
+                    });
+                    weekly_chart(ui, &theme, &weekly, half - 38.0, 150.0);
+                });
+                theme.panel_frame().show(ui, |ui| {
+                    ui.set_width(half - 38.0);
+                    ui.label(paint::strong("Games by source", 17.0));
+                    ui.add_space(6.0);
+                    let total = self.data.visible.len().max(1);
+                    let bar_width = (half - 38.0 - 250.0).max(80.0);
+                    for source in Source::ALL {
+                        let count = self
+                            .data
+                            .visible
+                            .iter()
+                            .filter(|g| g.source == source)
+                            .count();
+                        if count == 0 {
+                            continue;
+                        }
+                        ui.horizontal(|ui| {
+                            name_cell(ui, source_name(source), 150.0);
+                            paint::bar(
+                                ui,
+                                &theme,
+                                count as f32 / total as f32,
+                                source_colour(source),
+                                bar_width,
+                            );
+                            ui.label(paint::muted(count.to_string(), &theme));
+                        });
+                    }
+                    if self.data.visible.is_empty() {
+                        ui.label(paint::muted("No games yet.", &theme));
+                    }
+                    ui.allocate_space(vec2(0.0, 0.0));
+                });
+            });
+        });
     }
+}
+
+/// A fixed-width, left-aligned name at the start of a bar row, cut short
+/// with "…" if it doesn't fit.
+fn name_cell(ui: &mut egui::Ui, text: &str, width: f32) {
+    ui.allocate_ui_with_layout(
+        vec2(width, 20.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_width(width);
+            ui.add(egui::Label::new(text).truncate());
+        },
+    );
 }

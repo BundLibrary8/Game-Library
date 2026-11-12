@@ -80,11 +80,11 @@ pub enum WorkerResult {
     SessionStarted {
         game_id: i64,
     },
-    /// The game closed and its playtime was saved. `new_banners` lists any
-    /// earned banners this session unlocked.
+    /// The game closed and its playtime was saved. `unlocked` lists any
+    /// earned banners or badges this session unlocked.
     SessionEnded {
         summary: SessionSummary,
-        new_banners: Vec<&'static str>,
+        unlocked: Vec<&'static str>,
     },
     /// The game never appeared after launching; nothing was recorded.
     NeverStarted {
@@ -371,15 +371,12 @@ impl WorkerState {
                                 WorkerResult::SessionStarted { game_id }
                             }
                             TrackEvent::SessionEnded(summary) => {
-                                let new_banners =
-                                    db.grant_earned_banners(crate::now()).unwrap_or_else(|err| {
+                                let unlocked =
+                                    db.grant_earned_items(crate::now()).unwrap_or_else(|err| {
                                         log::error!("couldn't check earned banners: {err:#}");
                                         Vec::new()
                                     });
-                                WorkerResult::SessionEnded {
-                                    summary,
-                                    new_banners,
-                                }
+                                WorkerResult::SessionEnded { summary, unlocked }
                             }
                             TrackEvent::GaveUp { game_id } => {
                                 WorkerResult::NeverStarted { game_id }

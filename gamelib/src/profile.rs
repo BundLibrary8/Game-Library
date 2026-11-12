@@ -63,10 +63,10 @@ pub struct Profile {
     pub created_at: i64,
 }
 
-/// A banner unlocked automatically by a milestone.
+/// A banner or badge unlocked automatically by a milestone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EarnedBanner {
-    /// The shop catalogue id of the banner.
+pub struct EarnedItem {
+    /// The shop catalogue id of the item.
     pub item_id: &'static str,
     pub goal: Goal,
 }
@@ -94,29 +94,33 @@ impl Goal {
     }
 }
 
-pub const EARNED_BANNERS: &[EarnedBanner] = &[
-    EarnedBanner {
+pub const EARNED_ITEMS: &[EarnedItem] = &[
+    EarnedItem {
         item_id: "banner_100h",
         goal: Goal::HoursPlayed(100),
     },
-    EarnedBanner {
+    EarnedItem {
         item_id: "banner_250h",
         goal: Goal::HoursPlayed(250),
     },
-    EarnedBanner {
+    EarnedItem {
         item_id: "banner_500h",
         goal: Goal::HoursPlayed(500),
     },
-    EarnedBanner {
+    EarnedItem {
         item_id: "banner_10_finished",
         goal: Goal::GamesFinished(10),
     },
+    EarnedItem {
+        item_id: "badge_backlog_slayer",
+        goal: Goal::GamesFinished(5),
+    },
 ];
 
-/// Which earned banners these totals unlock. A pure function, so the rules
+/// Which earned items these totals unlock. A pure function, so the rules
 /// can be tested without a database.
-pub fn earned_banners(total_playtime_secs: u64, finished_games: u64) -> Vec<&'static str> {
-    EARNED_BANNERS
+pub fn earned_items(total_playtime_secs: u64, finished_games: u64) -> Vec<&'static str> {
+    EARNED_ITEMS
         .iter()
         .filter(|b| b.goal.is_met(total_playtime_secs, finished_games))
         .map(|b| b.item_id)
@@ -344,9 +348,9 @@ impl Db {
         Ok(())
     }
 
-    /// Hand out any earned banners the current totals have unlocked.
+    /// Hand out any earned banners and badges the current totals have unlocked.
     /// Returns the ids of the ones that are new this time.
-    pub fn grant_earned_banners(&self, now: i64) -> Result<Vec<&'static str>> {
+    pub fn grant_earned_items(&self, now: i64) -> Result<Vec<&'static str>> {
         let total_playtime: i64 = self
             .conn
             .query_row(
@@ -359,7 +363,7 @@ impl Db {
         let finished = self.finished_count()?;
 
         let mut newly_granted = Vec::new();
-        for item_id in earned_banners(total_playtime.max(0) as u64, finished) {
+        for item_id in earned_items(total_playtime.max(0) as u64, finished) {
             if self.grant_item(item_id, Acquired::Earned, now)? {
                 newly_granted.push(item_id);
             }
@@ -392,23 +396,27 @@ mod tests {
     }
 
     #[test]
-    fn earned_banner_rules() {
-        assert!(earned_banners(0, 0).is_empty());
-        assert!(earned_banners(100 * HOUR - 1, 9).is_empty());
-        assert_eq!(earned_banners(100 * HOUR, 0), ["banner_100h"]);
+    fn earned_item_rules() {
+        assert!(earned_items(0, 0).is_empty());
+        assert!(earned_items(100 * HOUR - 1, 4).is_empty());
+        assert_eq!(earned_items(100 * HOUR, 0), ["banner_100h"]);
+        assert_eq!(earned_items(260 * HOUR, 0), ["banner_100h", "banner_250h"]);
+        assert_eq!(earned_items(0, 5), ["badge_backlog_slayer"]);
         assert_eq!(
-            earned_banners(260 * HOUR, 0),
-            ["banner_100h", "banner_250h"]
+            earned_items(0, 10),
+            ["banner_10_finished", "badge_backlog_slayer"]
         );
-        assert_eq!(earned_banners(0, 10), ["banner_10_finished"]);
-        assert_eq!(earned_banners(500 * HOUR, 12).len(), 4);
+        assert_eq!(earned_items(500 * HOUR, 12).len(), 5);
     }
 
     #[test]
-    fn every_earned_banner_is_in_the_catalogue_and_not_for_sale() {
-        for banner in EARNED_BANNERS {
-            let item = shop::find_item(banner.item_id).expect("in catalogue");
-            assert_eq!(item.kind, ItemKind::ProfileBanner);
+    fn every_earned_item_is_in_the_catalogue_and_not_for_sale() {
+        for earned in EARNED_ITEMS {
+            let item = shop::find_item(earned.item_id).expect("in catalogue");
+            assert!(matches!(
+                item.kind,
+                ItemKind::ProfileBanner | ItemKind::Badge
+            ));
             assert_eq!(item.price, None);
         }
     }
@@ -596,13 +604,13 @@ mod tests {
     fn earned_banners_are_granted_once_when_the_goal_is_reached() {
         let db = Db::open_in_memory().unwrap();
         let game = add_game(&db, "long");
-        assert!(db.grant_earned_banners(1).unwrap().is_empty());
+        assert!(db.grant_earned_items(1).unwrap().is_empty());
 
         let s = db.start_session(game, 0).unwrap();
         db.finish_session(s, 100 * HOUR as i64).unwrap();
-        assert_eq!(db.grant_earned_banners(2).unwrap(), ["banner_100h"]);
+        assert_eq!(db.grant_earned_items(2).unwrap(), ["banner_100h"]);
         assert!(
-            db.grant_earned_banners(3).unwrap().is_empty(),
+            db.grant_earned_items(3).unwrap().is_empty(),
             "not granted twice"
         );
         assert!(db.owns_item("banner_100h").unwrap());

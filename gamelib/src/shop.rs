@@ -114,7 +114,7 @@ pub const CATALOGUE: &[ShopItem] = &[
     ),
     // Given to everyone who sets up GameLib in its first version.
     item(FOUNDER_BADGE_ID, "Founder", ItemKind::Badge, None),
-    // Earned banners: unlocked by milestones, see `profile::EARNED_BANNERS`.
+    // Earned banners: unlocked by milestones, see `profile::EARNED_ITEMS`.
     item(
         "banner_100h",
         "Century (100 h played)",
@@ -137,6 +137,13 @@ pub const CATALOGUE: &[ShopItem] = &[
         "banner_10_finished",
         "Finisher (10 games finished)",
         ItemKind::ProfileBanner,
+        None,
+    ),
+    // Earned badge: unlocked by finishing 5 games.
+    item(
+        "badge_backlog_slayer",
+        "Backlog Slayer",
+        ItemKind::Badge,
         None,
     ),
 ];
