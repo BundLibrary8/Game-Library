@@ -4,24 +4,30 @@ The non-UI half of GameLib: one library for Steam, Epic, GOG, loose folders
 and hand-added games, with launching, playtime tracking, cover art, stats,
 a local profile, Steam friends, and the Stardust shop.
 
-The egui window isn't built yet. Until it is, a small command-line tool
-(`src/main.rs`) lets you try everything. The design lives in
-[`../plan/gamelib plan/`](../plan/gamelib%20plan/00%20Home.md).
+There is a **temporary window** (`src/ui/`) so everything can be used with
+a mouse. It is plain on purpose and is meant to be replaced by the designs
+in [`../plan/gamelib plan/`](../plan/gamelib%20plan/00%20Home.md). The
+same program also has command-line commands (`src/cli.rs`).
 
 ## Try it
 
 ```powershell
-cargo run -- help
+cargo run                              # open the window
+cargo run -- help                      # list the command-line commands
 cargo run -- scan                      # find Steam, Epic and GOG games
-cargo run -- scan-folder D:\Games      # find loose games
 cargo run -- list
-cargo run -- launch 1                  # start game 1 and track playtime
-cargo run -- stats
 ```
+
+The first build takes several minutes; later ones are quick.
+
+In the window: **Scan** finds launcher games, **+ Add game** adds one by
+hand, click a game for its details, double-click (or press PLAY) to start
+it. Stats, Profile, Shop and Settings are in the sidebar.
 
 Data is kept in `%APPDATA%\gamelib\` (`library.db`, `covers\`,
 `gamelib.log`). Set the `GAMELIB_DATA_DIR` environment variable to use a
-different folder while experimenting.
+different folder while experimenting. If the window fails to open, try
+setting `GAMELIB_RENDERER=glow`.
 
 ## Checks
 
@@ -47,6 +53,7 @@ cargo fmt
 | `shop.rs` | Stardust ledger, rewards, catalogue, buying and equipping |
 | `worker.rs` | The background thread: the UI sends a `Job`, gets a `WorkerResult` back |
 | `paths.rs` | Where files live, and path comparison helpers |
+| `main.rs`, `cli.rs`, `ui/` | The program: the temporary window (one file per screen) and the commands |
 
 The UI will only need `Db` (for quick reads and edits) and `Worker` (for
 anything slow). See the example at the top of `worker.rs`.
@@ -74,5 +81,6 @@ Windows and need the manual checklist on a real PC:
 - Epic detection against real `.item` files (tested with sample files)
 - GOG registry reading (compiles for Windows; never run)
 - Opening `steam://` and Epic links
+- The window itself, and its file-picker dialogs (the window was run on Linux only)
 - SteamGridDB, Steam Store and Steam Web API calls (the parsers are tested
   against sample responses; the live endpoints were never called)
