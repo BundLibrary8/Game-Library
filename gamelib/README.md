@@ -4,10 +4,16 @@ The non-UI half of GameLib: one library for Steam, Epic, GOG, loose folders
 and hand-added games, with launching, playtime tracking, cover art, stats,
 a local profile, Steam friends, and the Stardust shop.
 
-There is a **temporary window** (`src/ui/`) so everything can be used with
-a mouse. It is plain on purpose and is meant to be replaced by the designs
-in [`../plan/gamelib plan/`](../plan/gamelib%20plan/00%20Home.md). The
-same program also has command-line commands (`src/cli.rs`).
+The window (`src/ui/`) follows the designs in
+[`../plan/gamelib plan/`](../plan/gamelib%20plan/00%20Home.md) and has two
+looks that share the same screens:
+
+- **Ember** (the default): dark panels, amber accent, top bar and sidebar.
+- **Constellation**: a star map behind glass panels, an icon rail, and an
+  ice-blue to violet accent. It switches on while the Constellation library
+  background from the Shop is equipped.
+
+The same program also has command-line commands (`src/cli.rs`).
 
 ## Try it
 
@@ -21,8 +27,16 @@ cargo run -- list
 The first build takes several minutes; later ones are quick.
 
 In the window: **Scan** finds launcher games, **+ Add game** adds one by
-hand, click a game for its details, double-click (or press PLAY) to start
-it. Stats, Profile, Shop and Settings are in the sidebar.
+hand. Click a game to open its page; hover a cover and press the play
+button to start it straight from the grid. Home, Library, Stats, Shop,
+Profile and Settings are in the top bar and sidebar (or the icon rail).
+
+To see a look without owning it, set the `GAMELIB_THEME` environment
+variable to `constellation`, `aurora`, `synthwave` or `ember`:
+
+```powershell
+$env:GAMELIB_THEME = "constellation"; cargo run
+```
 
 Data is kept in `%APPDATA%\gamelib\` (`library.db`, `covers\`,
 `gamelib.log`). Set the `GAMELIB_DATA_DIR` environment variable to use a
@@ -53,7 +67,9 @@ cargo fmt
 | `shop.rs` | Stardust ledger, rewards, catalogue, buying and equipping |
 | `worker.rs` | The background thread: the UI sends a `Job`, gets a `WorkerResult` back |
 | `paths.rs` | Where files live, and path comparison helpers |
-| `main.rs`, `cli.rs`, `ui/` | The program: the temporary window (one file per screen) and the commands |
+| `main.rs`, `cli.rs` | The program's entry point and the command-line commands |
+| `ui/` | The window: `mod.rs` (state and the frame around every screen), `theme.rs`, `paint.rs`, one file per screen, and `dialogs.rs` |
+| `assets/fonts/` | The Inter font (SIL Open Font License, see `LICENSE-Inter.txt`) |
 
 The UI will only need `Db` (for quick reads and edits) and `Worker` (for
 anything slow). See the example at the top of `worker.rs`.

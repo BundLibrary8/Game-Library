@@ -143,17 +143,14 @@ pub fn run(args: &[String]) -> Result<()> {
                     WorkerResult::SessionStarted { .. } => {
                         println!("Running. Playtime is being tracked.")
                     }
-                    WorkerResult::SessionEnded {
-                        summary,
-                        new_banners,
-                    } => {
+                    WorkerResult::SessionEnded { summary, unlocked } => {
                         println!(
                             "Played for {}. +✦{}",
                             format_duration(summary.duration_secs),
                             summary.stardust
                         );
-                        for banner in new_banners {
-                            println!("New banner unlocked: {banner}");
+                        for banner in unlocked {
+                            println!("Unlocked: {banner}");
                         }
                         break;
                     }
@@ -188,8 +185,8 @@ pub fn run(args: &[String]) -> Result<()> {
             let game = db.require_game(game_id(rest)?)?;
             let reward = db.finish_game(game.id, now())?;
             println!("{} marked as finished. +✦{reward}", game.title);
-            for banner in db.grant_earned_banners(now())? {
-                println!("New banner unlocked: {banner}");
+            for banner in db.grant_earned_items(now())? {
+                println!("Unlocked: {banner}");
             }
         }
         "covers" => {

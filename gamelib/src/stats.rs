@@ -90,6 +90,47 @@ impl Db {
         Ok(days)
     }
 
+    /// Playtime for each of the last `weeks` weeks, oldest first, ending
+    /// with the week that finishes at `now`. Pass a game id for one game,
+    /// or `None` for the whole library. Weeks with no play are 0, so the
+    /// result always has `weeks` entries (handy for drawing a chart).
+    pub fn weekly_playtime(
+        &self,
+        game_id: Option<i64>,
+        now: i64,
+        weeks: usize,
+    ) -> Result<Vec<u64>> {
+        const WEEK: i64 = 7 * SECS_PER_DAY;
+        let start = now - weeks as i64 * WEEK;
+        let mut stmt = self.conn.prepare(
+            "SELECT started_at, duration_secs FROM play_sessions
+             WHERE started_at > ?1 AND started_at <= ?2 AND (?3 IS NULL OR game_id = ?3)",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![start, now, game_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut totals = vec![0u64; weeks];
+        for row in rows {
+            let (started_at, duration) = row?;
+            // started_at is in (start, now], so the index is 0..weeks.
+            let index = ((started_at - start - 1) / WEEK) as usize;
+            if let Some(total) = totals.get_mut(index) {
+                *total += duration.max(0) as u64;
+            }
+        }
+        Ok(totals)
+    }
+
+    /// How many finished play sessions a game has had.
+    pub fn session_count(&self, game_id: i64) -> Result<u64> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM play_sessions WHERE game_id = ?1 AND closed = 1",
+            [game_id],
+            |row| row.get(0),
+        )?;
+        Ok(count as u64)
+    }
+
     /// Total playtime per source (Steam, Epic…), biggest first. Sources with
     /// no playtime are left out.
     pub fn playtime_by_source(&self) -> Result<Vec<(Source, u64)>> {
@@ -196,5 +237,30 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn weekly_playtime_buckets() {
+        let db = Db::open_in_memory().unwrap();
+        let a = add(&db, Source::Steam, "1", "A");
+        let b = add(&db, Source::Steam, "2", "B");
+        let week = 7 * SECS_PER_DAY;
+        let now = 100 * week;
+        play(&db, a, now - 10, 5); // this week
+        play(&db, a, now - week + 100, 30); // this week (just inside)
+        play(&db, a, now - week - 100, 200); // last week
+        play(&db, b, now - 2 * week - 100, 1000); // two weeks ago, other game
+        play(&db, a, now - 9 * week, 7777); // too old for a 4-week chart
+
+        assert_eq!(
+            db.weekly_playtime(Some(a), now, 4).unwrap(),
+            [0, 0, 200, 35]
+        );
+        assert_eq!(
+            db.weekly_playtime(None, now, 4).unwrap(),
+            [0, 1000, 200, 35]
+        );
+        assert_eq!(db.weekly_playtime(Some(b), now, 2).unwrap(), [0, 0]);
+        assert_eq!(db.session_count(a).unwrap(), 4);
     }
 }
