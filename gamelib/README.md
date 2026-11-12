@@ -5,13 +5,23 @@ and hand-added games, with launching, playtime tracking, cover art, stats,
 a local profile, Steam friends, and the Stardust shop.
 
 The window (`src/ui/`) follows the designs in
-[`../plan/gamelib plan/`](../plan/gamelib%20plan/00%20Home.md) and has two
-looks that share the same screens:
+[`../plan/gamelib plan/`](../plan/gamelib%20plan/00%20Home.md). **Ember**
+is the default look: dark panels, amber accent, top bar and sidebar.
 
-- **Ember** (the default): dark panels, amber accent, top bar and sidebar.
-- **Constellation**: a star map behind glass panels, an icon rail, and an
-  ice-blue to violet accent. It switches on while the Constellation library
-  background from the Shop is equipped.
+Equipping a library background from the Shop switches the whole app to
+that background's look. All three share one format (an animated picture
+behind glass panels, an icon rail, and a two-colour accent):
+
+- **Constellation**: twinkling star map with shooting stars.
+- **Aurora**: drifting northern lights.
+- **Synthwave**: a striped sunset over a rolling neon grid.
+
+The animation can be turned off in Settings.
+
+**Game artwork** is found automatically, with no key needed: Steam covers
+are copied from Steam's own library cache (or Steam's public image
+server), and every game's icon is read out of its exe. A SteamGridDB key
+in Settings adds covers for non-Steam games.
 
 The same program also has command-line commands (`src/cli.rs`).
 
@@ -60,6 +70,7 @@ cargo fmt
 | `sources/` | The `GameSource` trait and one file each for Steam, Epic, GOG and folder scan |
 | `launcher.rs` | Starts a game (an exe, or a `steam://` / Epic link) |
 | `playtime.rs` | Decides when a game is running; the pure `step` function plus the tracking loop |
+| `artwork.rs` | Covers from Steam's cache and icons read out of exes, no key needed |
 | `metadata.rs` | Covers from SteamGridDB, info from the Steam Store |
 | `stats.rs` | Totals, most played, playtime per day |
 | `profile.rs` | Name, bio, banner, badges, showcase, earned banners |
@@ -97,6 +108,7 @@ Windows and need the manual checklist on a real PC:
 - Epic detection against real `.item` files (tested with sample files)
 - GOG registry reading (compiles for Windows; never run)
 - Opening `steam://` and Epic links
+- Copying covers from a real Steam library cache, and Steam's public image server
 - The window itself, and its file-picker dialogs (the window was run on Linux only)
 - SteamGridDB, Steam Store and Steam Web API calls (the parsers are tested
   against sample responses; the live endpoints were never called)

@@ -91,6 +91,8 @@ pub struct Game {
     pub last_played: Option<i64>,
     pub added_at: i64,
     pub cover_path: Option<PathBuf>,
+    /// The game's own icon, read out of its exe and saved as a PNG.
+    pub icon_path: Option<PathBuf>,
     pub description: Option<String>,
     pub genres: Vec<String>,
     pub release_year: Option<u16>,

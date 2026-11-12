@@ -9,13 +9,15 @@
 //! - [`sources`]  finding installed games (Steam, Epic, GOG, folder scan)
 //! - [`launcher`] starting a game
 //! - [`playtime`] working out when a game is running, and for how long
-//! - [`metadata`] cover art and store info
+//! - [`metadata`] cover art and store info from the internet
+//! - [`artwork`]  covers and icons found on this PC
 //! - [`stats`]    totals and "most played" queries
 //! - [`profile`]  the local profile, showcase, badges and earned banners
 //! - [`friends`]  read-only Steam friends list
 //! - [`shop`]     Stardust ledger, rewards and the cosmetics shop
 //! - [`worker`]   the background thread the UI talks to through channels
 
+pub mod artwork;
 pub mod db;
 pub mod friends;
 pub mod launcher;

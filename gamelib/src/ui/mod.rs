@@ -8,7 +8,7 @@
 //! - `mod.rs` (this file): the app's state, loading data, talking to the
 //!   worker, and the frame around every screen (top bar, sidebar or icon
 //!   rail, status bar).
-//! - `theme.rs`: colours and fonts for the two looks.
+//! - `theme.rs`: colours and fonts for each look.
 //! - `paint.rs`: drawing helpers (gradients, star map, covers, buttons).
 //! - `home.rs`, `library.rs`, `details.rs`, `stats.rs`, `profile.rs`,
 //!   `shop.rs`, `settings.rs`: one screen each.
@@ -46,8 +46,8 @@ use crate::text::{short_playtime, thousands};
 
 /// How long a shop preview lasts, in seconds.
 const PREVIEW_SECS: f64 = 10.0;
-/// Setting: "1" to make the Constellation stars twinkle.
-const TWINKLE_KEY: &str = "ui.twinkle";
+/// Setting: "0" to stop the backgrounds moving.
+const ANIMATE_KEY: &str = "ui.animate";
 
 /// Which screen fills the middle of the window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,7 +218,11 @@ pub struct GameLibApp {
     preview: Option<(Backdrop, f64)>,
     /// A background forced with the GAMELIB_THEME environment variable.
     forced_backdrop: Option<Backdrop>,
-    twinkle: bool,
+    /// Whether the backgrounds move.
+    animate: bool,
+    /// The clock the backgrounds are drawn at this frame, or `None` when
+    /// they are standing still.
+    anim_time: Option<f64>,
 }
 
 /// Open the window and run until it is closed.
@@ -289,7 +293,8 @@ impl GameLibApp {
         };
         let mut app = GameLibApp {
             data: Data::load(&db, Filter::All, "", SortBy::LastPlayed)?,
-            twinkle: db.get_bool_setting(TWINKLE_KEY, false)?,
+            animate: db.get_bool_setting(ANIMATE_KEY, true)?,
+            anim_time: None,
             settings,
             db,
             worker,
@@ -453,11 +458,14 @@ impl GameLibApp {
                     // cached copy so the new one is shown.
                     ctx.forget_image(&paint::file_uri(&path));
                 }
+                WorkerResult::IconReady { path, .. } => {
+                    ctx.forget_image(&paint::file_uri(&path));
+                }
                 WorkerResult::InfoReady { .. } => {}
                 WorkerResult::CoversFinished { downloaded, failed } => {
                     self.job_done();
                     self.status = if downloaded > 0 || failed > 0 {
-                        format!("Downloaded {downloaded} covers ({failed} failed).")
+                        format!("Found {downloaded} covers ({failed} failed).")
                     } else {
                         String::new()
                     };
@@ -482,11 +490,7 @@ impl GameLibApp {
 
     /// The search box, shared by the top bar and the Constellation header.
     fn search_box(&mut self, ui: &mut egui::Ui, width: f32) {
-        let hint = if self.theme.rail {
-            "⌕  Search the stars…"
-        } else {
-            "⌕  Search your games…"
-        };
+        let hint = self.theme.search_hint();
         let edit = egui::TextEdit::singleline(&mut self.search)
             .hint_text(hint)
             .desired_width(width)
@@ -970,17 +974,19 @@ impl eframe::App for GameLibApp {
             theme.apply(&ctx);
         }
 
-        // Background first, then the panels on top of it.
-        let twinkling = self.twinkle && theme.backdrop == Backdrop::Constellation;
+        // Background first, then the panels on top of it. An animated
+        // background needs the window redrawn about 30 times a second.
+        let animating = self.animate && theme.backdrop != Backdrop::Plain;
+        self.anim_time = self.animate.then_some(time);
         paint::backdrop(
             ui.painter(),
             ui.max_rect(),
             &theme,
             &self.stars,
-            twinkling.then_some(time),
+            animating.then_some(time),
         );
-        if twinkling {
-            ctx.request_repaint_after(std::time::Duration::from_millis(60));
+        if animating {
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
         }
 
         let bar = egui::Frame::new()

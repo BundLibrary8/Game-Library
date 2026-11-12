@@ -89,7 +89,7 @@ pub fn pick_best_exe(folder_name: &str, candidates: &[(PathBuf, u64)]) -> Option
 
 /// Every `.exe` inside a game folder, up to [`MAX_DEPTH`] levels down,
 /// with its size.
-fn find_exes(game_dir: &Path) -> Vec<(PathBuf, u64)> {
+pub fn find_exes(game_dir: &Path) -> Vec<(PathBuf, u64)> {
     WalkDir::new(game_dir)
         .max_depth(MAX_DEPTH)
         .into_iter()

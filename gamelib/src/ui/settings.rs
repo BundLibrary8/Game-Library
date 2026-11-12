@@ -8,7 +8,7 @@ use gamelib::shop::{self, ItemKind};
 use gamelib::worker::Job;
 
 use super::theme::{bold, source_name};
-use super::{GameLibApp, TWINKLE_KEY, paint};
+use super::{ANIMATE_KEY, GameLibApp, paint};
 
 impl GameLibApp {
     pub fn settings_screen(&mut self, ui: &mut egui::Ui) {
@@ -133,7 +133,7 @@ impl GameLibApp {
             ));
             let mut choice: Option<Option<&'static str>> = None;
             ui.horizontal_wrapped(|ui| {
-                if paint::chip(ui, &theme, "Ember (default)", self.data.equipped.is_none())
+                if paint::chip(ui, &theme, "None (Ember)", self.data.equipped.is_none())
                     .clicked()
                 {
                     choice = Some(None);
@@ -155,19 +155,16 @@ impl GameLibApp {
             if let Some(choice) = choice {
                 self.check(self.db.equip_library_background(choice));
             }
-            let mut twinkle = self.twinkle;
+            let mut animate = self.animate;
             if ui
-                .checkbox(
-                    &mut twinkle,
-                    "Twinkling stars on the Constellation background",
-                )
+                .checkbox(&mut animate, "Animated backgrounds")
                 .on_hover_text(
-                    "Uses a little more of the processor, because the window redraws all the time.",
+                    "Turn this off to save a little processor and battery: the backgrounds stand still.",
                 )
                 .changed()
             {
-                self.twinkle = twinkle;
-                self.check(self.db.set_bool_setting(TWINKLE_KEY, twinkle));
+                self.animate = animate;
+                self.check(self.db.set_bool_setting(ANIMATE_KEY, animate));
             }
         });
         ui.add_space(14.0);

@@ -53,6 +53,7 @@ fn launching_a_real_process_records_its_playtime() {
     let config = WorkerConfig {
         db_path,
         covers_dir: dir.path().join("covers"),
+        icons_dir: dir.path().join("icons"),
         timings: Timings {
             poll_waiting: 1,
             poll_running: 1,

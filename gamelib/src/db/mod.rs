@@ -116,6 +116,8 @@ const MIGRATIONS: &[&str] = &[
         how TEXT NOT NULL          -- 'bought' | 'earned' | 'gift'
     );
     ",
+    // v3: each game's own icon
+    "ALTER TABLE games ADD COLUMN icon_path TEXT;",
 ];
 
 /// A connection to the library database.

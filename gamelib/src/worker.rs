@@ -30,10 +30,10 @@ use anyhow::{Context, Result};
 
 use crate::db::{Db, SessionSummary, keys};
 use crate::friends::{self, Friend};
-use crate::model::{DetectedGame, Source};
+use crate::model::{DetectedGame, Game, Source};
 use crate::playtime::{self, SystemEnvironment, Timings, TrackEvent};
 use crate::sources::{self, GameSource, ScanReport, folder::FolderSource};
-use crate::{launcher, metadata};
+use crate::{artwork, launcher, metadata};
 
 /// Work the UI can ask for.
 #[derive(Debug, Clone, PartialEq)]
@@ -94,6 +94,11 @@ pub enum WorkerResult {
         game_id: i64,
         path: PathBuf,
     },
+    /// The game's own icon was read out of its exe and saved.
+    IconReady {
+        game_id: i64,
+        path: PathBuf,
+    },
     /// Description/genres/year were saved for this game.
     InfoReady {
         game_id: i64,
@@ -117,6 +122,8 @@ pub enum WorkerResult {
 pub struct WorkerConfig {
     pub db_path: PathBuf,
     pub covers_dir: PathBuf,
+    /// Where icons read out of games' exes are saved.
+    pub icons_dir: PathBuf,
     pub timings: Timings,
 }
 
@@ -126,6 +133,7 @@ impl WorkerConfig {
         Ok(WorkerConfig {
             db_path: crate::paths::db_path()?,
             covers_dir: crate::paths::covers_dir()?,
+            icons_dir: crate::paths::icons_dir()?,
             timings: Timings::default(),
         })
     }
@@ -146,6 +154,10 @@ impl Worker {
         // Open the database here, so a failure is reported to the caller
         // straight away rather than lost inside the thread.
         let db = Db::open(&config.db_path)?;
+        for dir in [&config.covers_dir, &config.icons_dir] {
+            std::fs::create_dir_all(dir)
+                .with_context(|| format!("couldn't create {}", dir.display()))?;
+        }
         let (job_tx, job_rx) = mpsc::channel::<Job>();
         let (result_tx, result_rx) = mpsc::channel::<WorkerResult>();
 
@@ -423,62 +435,137 @@ impl WorkerState {
         Ok(())
     }
 
-    fn fetch_missing_covers(&self) -> Result<()> {
-        let games = self.db.games_without_cover()?;
-        let client = metadata::http_client()?;
-        // No key just means no covers; Steam Store info still works.
-        let api_key = self
-            .api_key(keys::STEAMGRIDDB_KEY, "SteamGridDB API key")
-            .ok();
-        let mut downloaded = 0;
-        let mut failed = 0;
-
-        // One at a time, with a pause, to be polite to the APIs. One
-        // failure doesn't stop the rest.
-        for game in games {
-            if let Some(api_key) = &api_key {
-                let cover =
-                    metadata::find_cover_url(&client, api_key, &game, None).and_then(|url| {
-                        let Some(url) = url else { return Ok(None) };
-                        metadata::download_cover(&client, &url, &self.config.covers_dir, game.id)
-                            .map(Some)
-                    });
-                match cover {
+    /// Artwork that is already on this PC: covers from Steam's own cache,
+    /// and icons read out of games' exes. No internet or key needed, so
+    /// this is done first. One failure doesn't stop the rest.
+    fn find_local_artwork(&self) -> Result<usize> {
+        let mut covers = 0;
+        // Steam not being installed just means there is no cache to look in.
+        let steam_root = steamlocate::SteamDir::locate()
+            .ok()
+            .map(|steam| steam.path().to_path_buf());
+        if let Some(steam_root) = &steam_root {
+            for game in self.db.games_without_cover()? {
+                match artwork::copy_steam_cache_cover(steam_root, &game, &self.config.covers_dir) {
                     Ok(Some(path)) => {
                         if self.db.set_cover_auto(game.id, &path)? {
-                            downloaded += 1;
+                            covers += 1;
                             self.reporter.send(WorkerResult::CoverReady {
                                 game_id: game.id,
                                 path,
                             });
                         }
                     }
-                    Ok(None) => log::info!("no cover found for {}", game.title),
-                    Err(err) => {
-                        failed += 1;
-                        log::warn!("cover for {} failed: {err:#}", game.title);
-                    }
-                }
-                thread::sleep(metadata::REQUEST_PAUSE);
-            }
-
-            if game.source == Source::Steam && game.description.is_none() {
-                match metadata::fetch_store_info(&client, &game.source_id) {
-                    Ok(Some(info)) => {
-                        self.db.set_game_info(
-                            game.id,
-                            info.description.as_deref(),
-                            &info.genres,
-                            info.release_year,
-                        )?;
-                        self.reporter
-                            .send(WorkerResult::InfoReady { game_id: game.id });
-                    }
                     Ok(None) => {}
-                    Err(err) => log::warn!("store info for {} failed: {err:#}", game.title),
+                    Err(err) => log::warn!("cached cover for {} failed: {err:#}", game.title),
                 }
-                thread::sleep(metadata::REQUEST_PAUSE);
             }
+        }
+
+        for game in self.db.games_without_icon()? {
+            let Some(exe) = artwork::icon_source_exe(&game) else {
+                continue;
+            };
+            let dest = self.config.icons_dir.join(format!("{}.png", game.id));
+            match artwork::save_exe_icon(&exe, &dest) {
+                Ok(true) => {
+                    self.db.set_icon(game.id, &dest)?;
+                    self.reporter.send(WorkerResult::IconReady {
+                        game_id: game.id,
+                        path: dest,
+                    });
+                }
+                Ok(false) => log::info!("{} has no icon in {}", game.title, exe.display()),
+                Err(err) => log::warn!("icon for {} failed: {err:#}", game.title),
+            }
+        }
+        Ok(covers)
+    }
+
+    /// Download one game's cover: Steam's public image server first for
+    /// Steam games (no key needed), then SteamGridDB if a key is set.
+    fn download_cover_for(
+        &self,
+        client: &reqwest::blocking::Client,
+        api_key: Option<&str>,
+        game: &Game,
+    ) -> Result<Option<PathBuf>> {
+        if game.source == Source::Steam {
+            let url = artwork::steam_cdn_cover_url(&game.source_id);
+            // Not every game has a cover there; a miss just moves on.
+            match metadata::download_cover(client, &url, &self.config.covers_dir, game.id) {
+                Ok(path) => return Ok(Some(path)),
+                Err(err) => log::info!("no Steam cover for {}: {err:#}", game.title),
+            }
+        }
+        let Some(api_key) = api_key else {
+            return Ok(None);
+        };
+        match metadata::find_cover_url(client, api_key, game, None)? {
+            Some(url) => {
+                metadata::download_cover(client, &url, &self.config.covers_dir, game.id).map(Some)
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn fetch_missing_covers(&self) -> Result<()> {
+        let mut downloaded = self.find_local_artwork()?;
+        let mut failed = 0;
+
+        let client = metadata::http_client()?;
+        // No key just means fewer covers; everything else still works.
+        let api_key = self
+            .api_key(keys::STEAMGRIDDB_KEY, "SteamGridDB API key")
+            .ok();
+
+        // One at a time, with a pause, to be polite to the servers. One
+        // failure doesn't stop the rest.
+        for game in self.db.games_without_cover()? {
+            if game.source != Source::Steam && api_key.is_none() {
+                continue; // nowhere to look for this one
+            }
+            match self.download_cover_for(&client, api_key.as_deref(), &game) {
+                Ok(Some(path)) => {
+                    if self.db.set_cover_auto(game.id, &path)? {
+                        downloaded += 1;
+                        self.reporter.send(WorkerResult::CoverReady {
+                            game_id: game.id,
+                            path,
+                        });
+                    }
+                }
+                Ok(None) => log::info!("no cover found for {}", game.title),
+                Err(err) => {
+                    failed += 1;
+                    log::warn!("cover for {} failed: {err:#}", game.title);
+                }
+            }
+            thread::sleep(metadata::REQUEST_PAUSE);
+        }
+
+        // Description, genres and year for Steam games that lack them.
+        let needs_info = self
+            .db
+            .list_games()?
+            .into_iter()
+            .filter(|g| g.source == Source::Steam && g.description.is_none());
+        for game in needs_info {
+            match metadata::fetch_store_info(&client, &game.source_id) {
+                Ok(Some(info)) => {
+                    self.db.set_game_info(
+                        game.id,
+                        info.description.as_deref(),
+                        &info.genres,
+                        info.release_year,
+                    )?;
+                    self.reporter
+                        .send(WorkerResult::InfoReady { game_id: game.id });
+                }
+                Ok(None) => {}
+                Err(err) => log::warn!("store info for {} failed: {err:#}", game.title),
+            }
+            thread::sleep(metadata::REQUEST_PAUSE);
         }
         self.reporter
             .send(WorkerResult::CoversFinished { downloaded, failed });
@@ -521,6 +608,7 @@ mod tests {
             let config = WorkerConfig {
                 db_path: dir.path().join("library.db"),
                 covers_dir: dir.path().join("covers"),
+                icons_dir: dir.path().join("icons"),
                 timings: Timings::default(),
             };
             let wakes = Arc::new(AtomicUsize::new(0));

@@ -259,7 +259,7 @@ impl GameLibApp {
         let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
         let clipped = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
         clipped.rect_filled(rect, 0.0, Color32::from_rgb(0x06, 0x09, 0x14));
-        self.stars.paint(&clipped, rect, None);
+        self.stars.paint(&clipped, rect, self.anim_time);
         round_off(ui.painter(), rect, 16.0, theme.bg);
         ui.painter().rect_stroke(
             rect,
@@ -471,7 +471,7 @@ impl GameLibApp {
             ItemKind::LibraryBackground => {
                 let preview_theme = Theme::for_backdrop(Backdrop::from_item(Some(item.id)));
                 let clipped = painter.with_clip_rect(rect.intersect(ui.clip_rect()));
-                paint::backdrop(&clipped, rect, &preview_theme, &self.stars, None);
+                paint::backdrop(&clipped, rect, &preview_theme, &self.stars, self.anim_time);
                 round_off(painter, rect, 10.0, theme.opaque_panel());
             }
             ItemKind::ProfileBanner => paint::gradient(painter, rect, 10.0, a, b, vec2(1.0, 0.6)),

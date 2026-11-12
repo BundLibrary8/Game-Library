@@ -28,7 +28,7 @@ Library
   tag <game id> <tag>        add a tag
   collection <game id> <name>  add to a collection
   finish <game id>           mark a game finished
-  covers                     download missing covers and store info
+  covers                     find covers, icons and store info
 
 Stats, profile and shop
   stats                      totals and most-played games
@@ -197,8 +197,11 @@ pub fn run(args: &[String]) -> Result<()> {
                     WorkerResult::CoverReady { game_id, path } => {
                         println!("  cover for game {game_id}: {}", path.display());
                     }
+                    WorkerResult::IconReady { game_id, path } => {
+                        println!("  icon for game {game_id}: {}", path.display());
+                    }
                     WorkerResult::CoversFinished { downloaded, failed } => {
-                        println!("Downloaded {downloaded} covers ({failed} failed).");
+                        println!("Found {downloaded} covers ({failed} failed).");
                         break;
                     }
                     WorkerResult::Error { context, message } => bail!("{context}: {message}"),

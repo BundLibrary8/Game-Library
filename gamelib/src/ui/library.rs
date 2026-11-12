@@ -34,7 +34,7 @@ impl GameLibApp {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 if theme.rail {
                     ui.label(
-                        paint::caps("Your universe", 12.5, theme.accent).extra_letter_spacing(3.0),
+                        paint::caps(theme.tagline(), 12.5, theme.accent).extra_letter_spacing(3.0),
                     );
                 }
                 ui.horizontal(|ui| {
