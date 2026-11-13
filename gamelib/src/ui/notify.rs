@@ -299,6 +299,75 @@ impl super::GameLibApp {
     }
 }
 
+// --- Discord -------------------------------------------------------------------
+
+/// Settings for Discord.
+pub const DISCORD_PRESENCE_KEY: &str = "discord.presence";
+pub const DISCORD_APP_KEY: &str = "discord.app_id";
+pub const DISCORD_WEBHOOK_KEY: &str = "discord.webhook";
+
+impl super::GameLibApp {
+    /// Start (or restart, or stop) Rich Presence from the settings.
+    pub fn start_discord(&mut self) {
+        self.discord = None;
+        let on = self
+            .db
+            .get_bool_setting(DISCORD_PRESENCE_KEY, false)
+            .unwrap_or(false);
+        let app_id = self
+            .db
+            .get_setting(DISCORD_APP_KEY)
+            .ok()
+            .flatten()
+            .filter(|id| !id.trim().is_empty());
+        if let (true, Some(app_id)) = (on, app_id) {
+            let errors = Arc::clone(&self.discord_error);
+            self.discord = Some(gamelib::discord::Presence::start(
+                app_id.trim().to_string(),
+                move |err| {
+                    if let Ok(mut slot) = errors.lock() {
+                        *slot = Some(err);
+                    }
+                },
+            ));
+        }
+    }
+
+    /// Post "You played X for 1h 20m" to the Discord webhook, if one is set.
+    pub fn post_session_to_discord(&mut self, game_id: i64, duration_secs: u64) {
+        let Some(url) = self
+            .db
+            .get_setting(DISCORD_WEBHOOK_KEY)
+            .ok()
+            .flatten()
+            .filter(|u| gamelib::discord::is_webhook_url(u))
+        else {
+            return;
+        };
+        // Very short sessions (a game that crashed on start) aren't worth a post.
+        if duration_secs < 120 {
+            return;
+        }
+        let total = self
+            .data
+            .game(game_id)
+            .map(|g| g.playtime_secs)
+            .unwrap_or(0)
+            + duration_secs;
+        let body = gamelib::discord::session_message(
+            &self.data.profile.display_name,
+            &self.title_of(game_id),
+            duration_secs,
+            total,
+        );
+        std::thread::spawn(move || {
+            if let Err(err) = gamelib::discord::post_webhook(&url, &body) {
+                log::warn!("Discord webhook: {err:#}");
+            }
+        });
+    }
+}
+
 // --- System tray (Windows) ---------------------------------------------------
 
 /// The tray icon and its menu: Open GameLib, Couch Mode, Quit.

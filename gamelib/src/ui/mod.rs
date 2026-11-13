@@ -15,6 +15,8 @@
 //! - `dialogs.rs`: the pop-up windows.
 //! - `couch.rs`: Couch Mode, the full-screen controller-friendly view.
 
+mod account;
+mod achievement_tracker;
 mod admin;
 mod assistant;
 mod backdrops;
@@ -24,11 +26,14 @@ mod devices;
 mod dialogs;
 mod discover;
 mod franchises;
+mod friends_screen;
 mod game_extras;
 mod game_more;
+mod game_room;
 mod health;
 mod home;
 mod library;
+mod mod_library;
 mod notify;
 mod paint;
 mod palette;
@@ -122,6 +127,8 @@ pub struct Memos {
     pub health: Option<Memo<HealthNow>>,
     pub stats: Option<Memo<std::rc::Rc<StatsNumbers>>>,
     pub goals: Option<Memo<GoalsNow>>,
+    pub friend_games: Option<Memo<std::rc::Rc<friends_screen::FriendGamesNow>>>,
+    pub mods: Option<Memo<std::rc::Rc<mod_library::ModsNow>>>,
 }
 
 /// The health report, and each game's measured size.
@@ -180,6 +187,16 @@ pub enum Screen {
     Health,
     /// Peripherals and Bluetooth devices.
     Devices,
+    /// Each game's achievements: completion, recent and rarest.
+    Achievements,
+    /// Steam friends and the games they have.
+    Friends,
+    /// Every game's mods.
+    Mods,
+    /// The virtual gaming room.
+    GameRoom,
+    /// Your GameLib account (log in, sign up, sharing).
+    Account,
     Franchises,
     Stats,
     Profile,
@@ -199,6 +216,11 @@ impl Screen {
             "admin" => Screen::Admin,
             "health" => Screen::Health,
             "devices" => Screen::Devices,
+            "achievements" => Screen::Achievements,
+            "friends" => Screen::Friends,
+            "mods" => Screen::Mods,
+            "room" => Screen::GameRoom,
+            "account" => Screen::Account,
             "wrapped" => Screen::Wrapped(gamelib::patterns::year_of(now(), local_offset())),
             "profile" => Screen::Profile,
             "shop" => Screen::Shop,
@@ -396,6 +418,8 @@ pub struct SettingsInputs {
     pub steamgriddb_key: String,
     pub steam_key: String,
     pub anthropic_key: String,
+    pub discord_app: String,
+    pub discord_webhook: String,
 }
 
 /// Everything the window is showing right now.
@@ -467,6 +491,15 @@ pub struct GameLibApp {
     memos: Memos,
     /// What the Devices screen found.
     devices: devices::DevicesState,
+    tracker: achievement_tracker::TrackerState,
+    /// GameLib accounts and friends (Supabase).
+    cloud: account::CloudState,
+    friends: friends_screen::FriendsState,
+    mod_library: mod_library::ModLibraryState,
+    /// Discord Rich Presence, when switched on.
+    discord: Option<gamelib::discord::Presence>,
+    /// The last problem talking to Discord, for Settings.
+    discord_error: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     /// Notification settings shared with the worker threads.
     shared: notify::Shared,
     /// Pop-ups in the corner of the window.
@@ -609,6 +642,10 @@ impl GameLibApp {
             steamgriddb_key: db.get_setting(keys::STEAMGRIDDB_KEY)?.unwrap_or_default(),
             steam_key: db.get_setting(keys::STEAM_API_KEY)?.unwrap_or_default(),
             anthropic_key: db.get_setting(keys::ANTHROPIC_KEY)?.unwrap_or_default(),
+            discord_app: db.get_setting(notify::DISCORD_APP_KEY)?.unwrap_or_default(),
+            discord_webhook: db
+                .get_setting(notify::DISCORD_WEBHOOK_KEY)?
+                .unwrap_or_default(),
         };
         // Reading the PC's specs takes a moment, so it's done on its own
         // thread rather than holding up the window.
@@ -630,6 +667,12 @@ impl GameLibApp {
             generation: 0,
             memos: Memos::default(),
             devices: devices::DevicesState::default(),
+            tracker: Default::default(),
+            cloud: Default::default(),
+            friends: Default::default(),
+            mod_library: Default::default(),
+            discord: None,
+            discord_error: Default::default(),
             shared,
             toasts: Vec::new(),
             tray: None,
@@ -680,6 +723,8 @@ impl GameLibApp {
             app.couch = Some(couch::Couch::new());
             app.couch_fullscreen_pending = true;
         }
+        app.start_discord();
+        app.start_cloud();
         // Notice games started from Steam, shortcuts and so on, and track
         // their playtime too.
         if app.db.get_bool_setting(AUTO_DETECT_KEY, true)? {
@@ -803,7 +848,8 @@ impl GameLibApp {
                 | WorkerResult::UpdateChecked(_)
                 | WorkerResult::AssistantReply(_)
                 | WorkerResult::SessionStarted { .. }
-                | WorkerResult::NeverStarted { .. } => {}
+                | WorkerResult::NeverStarted { .. }
+                | WorkerResult::Cloud(_) => {}
                 _ => self.dirty = true,
             }
             match result {
@@ -847,6 +893,13 @@ impl GameLibApp {
                     };
                 }
                 WorkerResult::SessionStarted { game_id } => {
+                    if let Some(discord) = &self.discord {
+                        discord.playing(gamelib::discord::Activity {
+                            details: self.title_of(game_id),
+                            state: "via GameLib".into(),
+                            started_at: now(),
+                        });
+                    }
                     if self.running.insert(game_id) {
                         // Not started from GameLib: the watcher noticed it.
                         let title = self.title_of(game_id);
@@ -859,6 +912,11 @@ impl GameLibApp {
                 }
                 WorkerResult::SessionEnded { summary, unlocked } => {
                     self.running.remove(&summary.game_id);
+                    if let Some(discord) = &self.discord {
+                        discord.clear();
+                    }
+                    self.post_session_to_discord(summary.game_id, summary.duration_secs);
+                    self.cloud_after_session();
                     let length = if summary.duration_secs < 60 {
                         "under a minute".to_string()
                     } else {
@@ -915,6 +973,31 @@ impl GameLibApp {
                 WorkerResult::FriendsUpdated(friends) => {
                     self.job_done();
                     self.status = format!("Friends updated ({}).", friends.len());
+                }
+                WorkerResult::Cloud(result) => {
+                    self.job_done();
+                    self.cloud_result(result);
+                }
+                WorkerResult::AchievementsUpdated { games, failed } => {
+                    self.job_done();
+                    self.status = format!("Read achievements for {games} games.");
+                    if let Some(first) = failed.first() {
+                        if games == 0 {
+                            self.error = Some(first.clone());
+                        } else {
+                            self.status
+                                .push_str(&format!(" {} couldn't be read.", failed.len()));
+                        }
+                    }
+                }
+                WorkerResult::FriendGamesUpdated { friends, private } => {
+                    self.job_done();
+                    self.status = format!("Read the games of {} friends", friends - private);
+                    if private > 0 {
+                        self.status
+                            .push_str(&format!(" ({private} keep theirs private)"));
+                    }
+                    self.status.push('.');
                 }
                 WorkerResult::DevicesFound { devices, bluetooth } => {
                     self.devices_found(devices, bluetooth);
@@ -1086,6 +1169,7 @@ impl GameLibApp {
                     for (screen, icon, tip) in [
                         (Screen::Home, Icon::Home, "Home"),
                         (Screen::Library, Icon::Library, "Library"),
+                        (Screen::GameRoom, Icon::Room, "Game Room"),
                         (
                             Screen::Discover,
                             Icon::Discover,
@@ -1099,6 +1183,8 @@ impl GameLibApp {
                         (Screen::Franchises, Icon::Franchises, "Franchises"),
                         (Screen::Stats, Icon::Stats, "Stats"),
                         (Screen::Shop, Icon::Shop, "Shop"),
+                        (Screen::Friends, Icon::Friends, "Friends and their games"),
+                        (Screen::Mods, Icon::Mods, "Mod library"),
                         (Screen::Health, Icon::Health, "Library health"),
                         (
                             Screen::Devices,
@@ -1111,7 +1197,10 @@ impl GameLibApp {
                             || (screen == Screen::Library
                                 && matches!(self.screen, Screen::Details(_)))
                             || (screen == Screen::Stats
-                                && matches!(self.screen, Screen::Wrapped(_)));
+                                && matches!(
+                                    self.screen,
+                                    Screen::Wrapped(_) | Screen::Achievements
+                                ));
                         let (rect, response) =
                             ui.allocate_exact_size(vec2(50.0, 50.0), Sense::click());
                         if selected {
@@ -1406,6 +1495,11 @@ impl GameLibApp {
                                     Screen::Admin => self.admin_screen(ui),
                                     Screen::Health => self.health_screen(ui),
                                     Screen::Devices => self.devices_screen(ui),
+                                    Screen::Achievements => self.tracker_screen(ui),
+                                    Screen::Friends => self.friends_screen(ui),
+                                    Screen::Mods => self.mod_library_screen(ui),
+                                    Screen::GameRoom => self.game_room_screen(ui),
+                                    Screen::Account => self.account_screen(ui),
                                     Screen::Franchises => self.franchises_screen(ui),
                                     Screen::Stats => self.stats_screen(ui),
                                     Screen::Profile => self.profile_screen(ui),

@@ -337,6 +337,107 @@ impl GameLibApp {
                 self.worker.send(gamelib::worker::Job::WatchForGames(auto));
             }
             ui.add_space(10.0);
+            ui.label(paint::strong("GameLib account", 17.0));
+            match &self.cloud.account {
+                Some((profile, email)) => {
+                    ui.label(format!("Logged in as @{} ({email})", profile.username));
+                }
+                None => {
+                    ui.label(paint::muted("Not logged in.", &theme));
+                }
+            }
+            ui.horizontal(|ui| {
+                if ui.button("Open account").clicked() {
+                    self.go(super::Screen::Account);
+                }
+                ui.label("Supabase anon key");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.cloud.anon_key)
+                        .password(true)
+                        .hint_text("Project Settings → API")
+                        .desired_width(260.0),
+                );
+                if ui.button("Save key").clicked() {
+                    let key = self.cloud.anon_key.trim().to_string();
+                    if key.len() < 20 {
+                        self.error = Some("That key looks too short.".into());
+                    } else if self.check(self.db.set_cloud_anon_key(&key)).is_some() {
+                        self.status = "Supabase key saved.".into();
+                    }
+                }
+            });
+            ui.label(paint::muted(
+                format!("Accounts, friends and shared libraries are stored in {}.", gamelib::cloud::DEFAULT_URL),
+                &theme,
+            ));
+            ui.add_space(10.0);
+            ui.label(paint::strong("Discord", 17.0));
+            let mut presence = self
+                .db
+                .get_bool_setting(super::notify::DISCORD_PRESENCE_KEY, false)
+                .unwrap_or(false);
+            let mut restart = false;
+            if ui
+                .checkbox(&mut presence, "Show what I'm playing on my Discord profile (Rich Presence)")
+                .changed()
+            {
+                self.check(self.db.set_bool_setting(super::notify::DISCORD_PRESENCE_KEY, presence));
+                restart = true;
+            }
+            ui.horizontal(|ui| {
+                ui.label("Application ID");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.settings.discord_app)
+                        .hint_text("from discord.com/developers")
+                        .desired_width(220.0),
+                );
+                if ui.button("Save").clicked() {
+                    let id = self.settings.discord_app.trim().to_string();
+                    if id.is_empty() || id.chars().all(|c| c.is_ascii_digit()) {
+                        self.check(self.db.set_setting(super::notify::DISCORD_APP_KEY, &id));
+                        restart = true;
+                    } else {
+                        self.error = Some("A Discord application ID is a long number.".into());
+                    }
+                }
+            });
+            ui.label(paint::muted(
+                "Discord needs an application for this: at discord.com/developers/applications press New Application, call it GameLib, and copy its Application ID here. The Discord app must be running.",
+                &theme,
+            ));
+            if let Some(err) = self.discord_error.lock().ok().and_then(|e| e.clone()) {
+                ui.label(egui::RichText::new(format!("Last problem: {err}")).color(theme.muted).size(12.5));
+            }
+            ui.horizontal(|ui| {
+                ui.label("Post sessions to a channel");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.settings.discord_webhook)
+                        .password(true)
+                        .hint_text("Webhook URL (optional)")
+                        .desired_width(300.0),
+                );
+                if ui.button("Save").clicked() {
+                    let url = self.settings.discord_webhook.trim().to_string();
+                    if url.is_empty() || gamelib::discord::is_webhook_url(&url) {
+                        self.check(self.db.set_setting(super::notify::DISCORD_WEBHOOK_KEY, &url));
+                        self.status = if url.is_empty() {
+                            "Discord posts switched off.".into()
+                        } else {
+                            "Sessions will be posted to Discord.".into()
+                        };
+                    } else {
+                        self.error = Some("That isn't a Discord webhook URL (it starts https://discord.com/api/webhooks/).".into());
+                    }
+                }
+            });
+            ui.label(paint::muted(
+                "In Discord: Server Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL. Sessions over two minutes are posted.",
+                &theme,
+            ));
+            if restart {
+                self.start_discord();
+            }
+            ui.add_space(10.0);
             ui.label(paint::strong("Notifications and tray", 17.0));
             let mut desktop = self.db.get_bool_setting(NOTIFY_KEY, true).unwrap_or(true);
             if ui

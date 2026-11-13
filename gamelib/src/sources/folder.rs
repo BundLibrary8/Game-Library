@@ -120,6 +120,10 @@ pub fn scan_folder(root: &Path, skip_dirs: &[PathBuf]) -> Result<Vec<DetectedGam
     let entries = std::fs::read_dir(root)
         .with_context(|| format!("couldn't open the folder {}", root.display()))?;
 
+    // The folders to skip, spelled the same way as `root` (on Windows the
+    // same folder can be spelled two ways, e.g. C:\Users\RUNNER~1 and the
+    // long name, and only real paths compare equal).
+    let skip_dirs: Vec<PathBuf> = skip_dirs.iter().map(|d| real_path(d)).collect();
     let mut games = Vec::new();
     for entry in entries {
         let Ok(entry) = entry else { continue };

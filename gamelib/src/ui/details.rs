@@ -193,6 +193,28 @@ impl GameLibApp {
         ui.add_space(14.0);
         self.launch_and_journal_panel(ui, &game);
         ui.add_space(14.0);
+        self.achievements_panel_for(ui, &game);
+        ui.add_space(14.0);
+        // Friends who have it too.
+        let time = ui.input(|i| i.time);
+        let owners = self.friends_who_own(&game, time);
+        if !owners.is_empty() {
+            let theme = self.theme;
+            paint::panel(ui, theme.panel_frame().inner_margin(24.0), |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(paint::strong(
+                    format!("{} of your friends have it", owners.len()),
+                    16.0,
+                ));
+                let names: Vec<String> = owners
+                    .iter()
+                    .take(12)
+                    .map(|(name, minutes)| format!("{name} ({}h)", minutes / 60))
+                    .collect();
+                ui.label(paint::muted(names.join(" · "), &theme));
+            });
+            ui.add_space(14.0);
+        }
         self.screenshots_panel(ui, &game);
         ui.add_space(14.0);
         self.requirements_panel(ui, &game, &extras);

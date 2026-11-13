@@ -64,6 +64,12 @@ pub enum Job {
     ScanDevices,
     /// Connect or disconnect a paired Bluetooth device.
     SetBluetooth { address: u64, connect: bool },
+    /// Read Steam achievements: for one game, or every Steam game.
+    FetchAchievements { game_id: Option<i64> },
+    /// Read which games each Steam friend owns.
+    FetchFriendGames,
+    /// Something with your GameLib account.
+    Cloud(CloudJob),
     /// Switch on (or off) noticing games started outside GameLib (from
     /// Steam, a desktop shortcut…) and tracking their playtime too.
     WatchForGames(bool),
@@ -87,6 +93,67 @@ pub enum Job {
     },
     /// Finish the current job and stop the worker.
     Shutdown,
+}
+
+/// A password: kept out of logs and debug output.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Secret(pub String);
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(***)")
+    }
+}
+
+/// Things to do with your GameLib account (Supabase).
+#[derive(Debug, Clone, PartialEq)]
+pub enum CloudJob {
+    SignUp {
+        username: String,
+        email: String,
+        password: Secret,
+    },
+    LogIn {
+        email: String,
+        password: Secret,
+    },
+    LogOut,
+    /// Check the saved login still works and fetch the profile.
+    Check,
+    /// Upload your library and stats (if sharing is on).
+    Share,
+    /// Delete your shared library and stats.
+    Unshare,
+    Friends,
+    AddFriend(String),
+    Respond {
+        request: i64,
+        accept: bool,
+    },
+    RemoveFriend(String),
+    FriendLibrary(String),
+    UpdateProfile {
+        display_name: String,
+        bio: String,
+    },
+}
+
+/// What a [`CloudJob`] found.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CloudResult {
+    /// Logged in as this account (or `None`: logged out).
+    Account(Option<(crate::cloud::Profile, String)>),
+    /// Signed up; Supabase emailed a confirmation link.
+    ConfirmEmail,
+    Friends(Vec<crate::cloud::Friendship>),
+    FriendLibrary {
+        user_id: String,
+        games: Vec<crate::cloud::SharedGame>,
+        stats: Option<crate::cloud::SharedStats>,
+    },
+    /// Something worth a line in the status bar.
+    Done(String),
+    Failed(String),
 }
 
 /// Which launch profile to start a game with.
@@ -173,6 +240,19 @@ pub enum WorkerResult {
         devices: Result<Vec<crate::devices::Device>, String>,
         bluetooth: Result<Vec<crate::devices::BtDevice>, String>,
     },
+    /// Achievements were read: how many games, and any that failed.
+    AchievementsUpdated {
+        games: usize,
+        failed: Vec<String>,
+    },
+    /// Friends' game lists were read: how many friends, and how many
+    /// keep theirs private.
+    FriendGamesUpdated {
+        friends: usize,
+        private: usize,
+    },
+    /// A GameLib account job finished.
+    Cloud(CloudResult),
     /// A Bluetooth device was connected or disconnected (or wasn't).
     BluetoothChanged {
         address: u64,
@@ -231,6 +311,7 @@ impl Job {
                 | Job::AskClaude { .. }
                 | Job::CheckForUpdates
                 | Job::WatchForGames(_)
+                | Job::Cloud(_)
         )
     }
 }
@@ -456,6 +537,9 @@ impl WorkerState {
             Job::ScanDevices => "Couldn't list devices".to_string(),
             Job::SetBluetooth { .. } => "Bluetooth".to_string(),
             Job::WatchForGames(_) => "Couldn't watch for games".to_string(),
+            Job::FetchAchievements { .. } => "Couldn't read achievements".to_string(),
+            Job::FetchFriendGames => "Couldn't read your friends' games".to_string(),
+            Job::Cloud(_) => "GameLib account".to_string(),
             Job::Shutdown => return,
         };
         let outcome = match job {
@@ -465,6 +549,15 @@ impl WorkerState {
             Job::Launch { game_id, profile } => self.launch(game_id, profile),
             Job::MeasureDisk => self.measure_disk(),
             Job::WatchForGames(on) => self.watch_for_games(on),
+            Job::FetchAchievements { game_id } => self.fetch_achievements(game_id),
+            Job::FetchFriendGames => self.fetch_friend_games(),
+            Job::Cloud(job) => {
+                let result = self
+                    .cloud(job)
+                    .unwrap_or_else(|err| CloudResult::Failed(format!("{err:#}")));
+                self.reporter.send(WorkerResult::Cloud(result));
+                Ok(())
+            }
             Job::ScanDevices => {
                 let devices = crate::devices::list_devices().map_err(|e| format!("{e:#}"));
                 let bluetooth = crate::devices::bluetooth_devices().map_err(|e| format!("{e:#}"));
@@ -889,6 +982,31 @@ impl WorkerState {
                 }
             }
         }
+        // Epic games: the official box art, from the catalogue the Epic
+        // launcher keeps on this PC.
+        if game.source == Source::Epic
+            && let Some(catalog) = crate::covers_extra::epic_catalog()
+        {
+            let item_id = match &game.launch {
+                crate::model::LaunchTarget::Uri(uri) => crate::covers_extra::epic_item_id(uri),
+                _ => None,
+            };
+            match crate::covers_extra::epic_cover_url(
+                catalog,
+                &game.source_id,
+                item_id.as_deref(),
+                &game.title,
+            ) {
+                Ok(Some(url)) => {
+                    match metadata::download_cover(client, &url, covers_dir, game.id) {
+                        Ok(path) => return Ok(Some(path)),
+                        Err(err) => note("Epic box art download failed", &err),
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => note("Epic catalogue unreadable", &err),
+            }
+        }
         if let Some(api_key) = api_key {
             match metadata::find_cover_url(client, api_key, game, None) {
                 Ok(Some(url)) => {
@@ -916,6 +1034,17 @@ impl WorkerState {
                 Ok(None) => {}
                 Err(err) => note("Steam Store lookup failed", &err),
             }
+        }
+        // Last of all: the picture at the top of the game's Wikipedia
+        // article (its cover or logo). This is how games that are on no
+        // store GameLib can read, like Valorant, get a cover.
+        match crate::covers_extra::wikipedia_cover_url(client, &game.title) {
+            Ok(Some(url)) => match metadata::download_cover(client, &url, covers_dir, game.id) {
+                Ok(path) => return Ok(Some(path)),
+                Err(err) => note("Wikipedia picture download failed", &err),
+            },
+            Ok(None) => {}
+            Err(err) => note("Wikipedia lookup failed", &err),
         }
         if unreachable {
             anyhow::bail!("the artwork servers couldn't be reached");
@@ -1036,6 +1165,218 @@ impl WorkerState {
                 info.requirements_rec.as_deref(),
             )?;
         }
+        Ok(())
+    }
+
+    fn cloud(&self, job: CloudJob) -> Result<CloudResult> {
+        use crate::cloud::{self, Cloud, RequestOutcome, SignUp};
+        let client = Cloud::new(self.db.cloud_project()?)?;
+        let now = crate::now();
+        let account = |session: &cloud::Session| -> Result<CloudResult> {
+            let profile = client.my_profile(session)?;
+            Ok(CloudResult::Account(Some((profile, session.email.clone()))))
+        };
+        Ok(match job {
+            CloudJob::SignUp {
+                username,
+                email,
+                password,
+            } => match client.sign_up(&username, &email, &password.0, now)? {
+                SignUp::LoggedIn(session) => {
+                    self.db.set_cloud_session(Some(&session))?;
+                    let result = account(&session)?;
+                    self.share_library(&client, &session)?;
+                    result
+                }
+                SignUp::ConfirmEmail => CloudResult::ConfirmEmail,
+            },
+            CloudJob::LogIn { email, password } => {
+                let session = client.log_in(&email, &password.0, now)?;
+                self.db.set_cloud_session(Some(&session))?;
+                let result = account(&session)?;
+                self.share_library(&client, &session)?;
+                result
+            }
+            CloudJob::LogOut => {
+                if let Some(session) = self.db.cloud_session()? {
+                    // Logging out locally works even if Supabase can't be reached.
+                    if let Err(err) = client.log_out(&session) {
+                        log::info!("Supabase log out: {err:#}");
+                    }
+                }
+                self.db.set_cloud_session(None)?;
+                CloudResult::Account(None)
+            }
+            CloudJob::Check => match self.db.cloud_session()? {
+                None => CloudResult::Account(None),
+                Some(_) => {
+                    let session = cloud::fresh_session(&self.db, &client, now)?;
+                    account(&session)?
+                }
+            },
+            CloudJob::Share => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                self.share_library(&client, &session)?;
+                CloudResult::Done("Your library is shared with your friends.".into())
+            }
+            CloudJob::Unshare => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                client.unshare(&session)?;
+                CloudResult::Done("Your library is no longer shared.".into())
+            }
+            CloudJob::Friends => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                CloudResult::Friends(client.friendships(&session)?)
+            }
+            CloudJob::AddFriend(username) => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                let message = match client.send_friend_request(&session, &username)? {
+                    RequestOutcome::Sent => format!("Friend request sent to {}.", username.trim()),
+                    RequestOutcome::Accepted => {
+                        format!("You and {} are now friends.", username.trim())
+                    }
+                    RequestOutcome::AlreadyFriends => {
+                        format!("You've already added {}.", username.trim())
+                    }
+                    RequestOutcome::NotFound => {
+                        format!("There's no GameLib account called {}.", username.trim())
+                    }
+                    RequestOutcome::Yourself => "That's you!".into(),
+                };
+                self.reporter.send(WorkerResult::Cloud(CloudResult::Friends(
+                    client.friendships(&session)?,
+                )));
+                CloudResult::Done(message)
+            }
+            CloudJob::Respond { request, accept } => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                client.respond(&session, request, accept)?;
+                CloudResult::Friends(client.friendships(&session)?)
+            }
+            CloudJob::RemoveFriend(other) => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                client.remove_friend(&session, &other)?;
+                CloudResult::Friends(client.friendships(&session)?)
+            }
+            CloudJob::FriendLibrary(user_id) => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                let (games, stats) = client.friend_library(&session, &user_id)?;
+                CloudResult::FriendLibrary {
+                    user_id,
+                    games,
+                    stats,
+                }
+            }
+            CloudJob::UpdateProfile { display_name, bio } => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                client.update_profile(&session, &display_name, &bio)?;
+                account(&session)?
+            }
+        })
+    }
+
+    /// Upload the library and stats, if sharing is switched on.
+    fn share_library(
+        &self,
+        client: &crate::cloud::Cloud,
+        session: &crate::cloud::Session,
+    ) -> Result<()> {
+        if !self.db.cloud_sharing()? {
+            return Ok(());
+        }
+        let games = self.db.list_games()?;
+        let extras = self.db.all_extras()?;
+        let sessions = self.db.session_rows(i64::MIN)?.len();
+        let achievements = self
+            .db
+            .achievement_completion()?
+            .values()
+            .map(|c| c.unlocked)
+            .sum();
+        client.share(
+            session,
+            &crate::cloud::shared_games(&games, &extras),
+            &crate::cloud::shared_stats(&games, &extras, sessions, achievements),
+        )
+    }
+
+    /// The Steam Web API key and Steam account, or a clear message about
+    /// which is missing.
+    fn steam_account(&self) -> Result<(String, String)> {
+        let api_key = self.api_key(keys::STEAM_API_KEY, "Steam Web API key")?;
+        let steam_id = self
+            .db
+            .profile(crate::now())?
+            .steam_id
+            .context("no Steam account is linked in your profile")?;
+        Ok((api_key, steam_id))
+    }
+
+    fn fetch_achievements(&self, game_id: Option<i64>) -> Result<()> {
+        let (api_key, steam_id) = self.steam_account()?;
+        let client = metadata::http_client()?;
+        let games: Vec<Game> = match game_id {
+            Some(id) => vec![self.db.require_game(id)?],
+            None => self
+                .db
+                .list_games()?
+                .into_iter()
+                .filter(|g| g.source == Source::Steam && g.playtime_secs > 0)
+                .collect(),
+        };
+        let mut done = 0;
+        let mut failed = Vec::new();
+        for game in games.iter().filter(|g| g.source == Source::Steam) {
+            match crate::game_achievements::fetch_steam(
+                &client,
+                &api_key,
+                &steam_id,
+                &game.source_id,
+                game.id,
+            ) {
+                // Games without achievements come back empty; that's fine.
+                Ok(list) => {
+                    self.db.save_steam_achievements(game.id, &list)?;
+                    done += 1;
+                }
+                Err(err) => {
+                    log::info!("achievements for {}: {err:#}", game.title);
+                    failed.push(format!("{}: {err:#}", game.title));
+                    if metadata::is_unreachable(&err) {
+                        break; // offline: no point trying the rest
+                    }
+                }
+            }
+        }
+        self.reporter.send(WorkerResult::AchievementsUpdated {
+            games: done,
+            failed,
+        });
+        Ok(())
+    }
+
+    fn fetch_friend_games(&self) -> Result<()> {
+        let (api_key, _) = self.steam_account()?;
+        let client = metadata::http_client()?;
+        let friends = self.db.cached_friends()?;
+        anyhow::ensure!(
+            !friends.is_empty(),
+            "no friends loaded yet: refresh your friends list on your profile first"
+        );
+        let mut private = 0;
+        for friend in &friends {
+            let games =
+                crate::friend_games::fetch_owned_games(&client, &api_key, &friend.steam_id)?;
+            if games.is_none() {
+                private += 1;
+            }
+            self.db
+                .save_friend_games(&friend.steam_id, games.as_deref(), crate::now())?;
+        }
+        self.reporter.send(WorkerResult::FriendGamesUpdated {
+            friends: friends.len(),
+            private,
+        });
         Ok(())
     }
 

@@ -103,6 +103,27 @@ pub fn open_link(url: &str) -> Result<()> {
     Ok(())
 }
 
+/// Show a folder in the file manager (Explorer on Windows).
+pub fn open_folder(dir: &Path) -> Result<()> {
+    anyhow::ensure!(dir.is_dir(), "{} isn't a folder", dir.display());
+    let mut command = if cfg!(windows) {
+        Command::new("explorer.exe")
+    } else if cfg!(target_os = "macos") {
+        Command::new("open")
+    } else {
+        Command::new("xdg-open")
+    };
+    command.arg(dir);
+    detach(&mut command);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| format!("couldn't open {}", dir.display()))?;
+    Ok(())
+}
+
 /// Open Windows' Bluetooth settings page.
 pub fn open_bluetooth_settings() -> Result<()> {
     anyhow::ensure!(

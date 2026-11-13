@@ -1,0 +1,5 @@
+{"game":{"gameName":"Spacewar","gameVersion":"1","availableGameStats":{"achievements":[
+  {"name":"ACH_WIN_ONE_GAME","defaultvalue":0,"displayName":"Winner","hidden":0,"description":"Win one game.",
+   "icon":"https://cdn.steam.example/win.jpg","icongray":"https://cdn.steam.example/win_gray.jpg"},
+  {"name":"ACH_WIN_100_GAMES","defaultvalue":0,"displayName":"Champion","hidden":0,"description":"Win 100 games.",
+   "icon":"https://cdn.steam.example/win100.jpg","icongray":"https://cdn.steam.example/win100_gray.jpg"}]}}}
