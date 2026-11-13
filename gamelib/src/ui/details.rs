@@ -121,7 +121,7 @@ impl GameLibApp {
                         self.check(self.db.set_favourite(game_id, !game.favourite));
                     }
 
-                    let more = egui::Button::new(egui::RichText::new("⋯").size(22.0))
+                    let more = egui::Button::new(egui::RichText::new("•••").size(15.0))
                         .min_size(vec2(56.0, 56.0))
                         .corner_radius(14.0);
                     egui::containers::menu::MenuButton::from_button(more).ui(ui, |ui| {

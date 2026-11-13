@@ -310,6 +310,12 @@ pub fn backdrop(
         Backdrop::Constellation => stars.paint(painter, rect, time),
         Backdrop::Aurora => aurora(painter, rect, stars, time),
         Backdrop::Synthwave => synthwave(painter, rect, stars, time),
+        Backdrop::Fireflies => super::backdrops::fireflies(painter, rect, stars, time),
+        Backdrop::Ocean => super::backdrops::ocean(painter, rect, stars, time),
+        Backdrop::Sakura => super::backdrops::sakura(painter, rect, stars, time),
+        Backdrop::Rain => super::backdrops::rain(painter, rect, stars, time),
+        Backdrop::Nebula => super::backdrops::nebula(painter, rect, stars, time),
+        Backdrop::Frost => super::backdrops::frost(painter, rect, stars, time),
     }
 }
 
@@ -772,6 +778,12 @@ pub fn item_colours(item_id: &str) -> (Color32, Color32) {
         "bg_constellation" => (0x3a2a8a, 0x0a1830),
         "bg_aurora" => (0x1f9a6a, 0x6a3fd0),
         "bg_synthwave_grid" => (0xf03aa0, 0x1a0630),
+        "bg_fireflies" => (0x6a9a30, 0x0a2018),
+        "bg_ocean" => (0x1a78b0, 0x041030),
+        "bg_sakura" => (0xe07aa8, 0x3a1440),
+        "bg_neon_rain" => (0xd03a9a, 0x0a1430),
+        "bg_cosmic_nebula" => (0x8a4ae0, 0x10061e),
+        "bg_frost" => (0x7ab4e0, 0x10203a),
         "badge_night_owl" => (0x8a5cf0, 0x3a2a6a),
         "badge_speedrunner" => (0x3b9dee, 0x1b3a6b),
         "badge_coop_captain" => (0x2fb7a4, 0x14403c),

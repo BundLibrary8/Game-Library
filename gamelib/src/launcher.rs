@@ -19,6 +19,7 @@ pub fn launch(game: &Game) -> Result<()> {
         );
     }
     let mut command = build_command(&game.launch)?;
+    detach(&mut command);
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -91,7 +92,9 @@ fn check_uri(uri: &str) -> Result<()> {
 pub fn open_link(url: &str) -> Result<()> {
     anyhow::ensure!(url.starts_with("https://"), "'{url}' isn't a web link");
     check_uri(url)?;
-    uri_command(url)
+    let mut command = uri_command(url);
+    detach(&mut command);
+    command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -113,6 +116,30 @@ pub fn open_bluetooth_settings() -> Result<()> {
         .spawn()
         .context("couldn't open Bluetooth settings")?;
     Ok(())
+}
+
+/// Start the game as its own program, not tied to GameLib.
+///
+/// On Windows a child normally shares GameLib's console (if it has one)
+/// and its group for Ctrl+C and "close" signals. A game or launcher that
+/// closes its console, or a console being closed, could then take GameLib
+/// down with it. Detaching keeps the two apart: GameLib stays open while
+/// the game runs, and the game keeps running if GameLib closes.
+fn detach(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::process::CommandExt;
+        // Its own process group, so a Ctrl+C in GameLib's terminal isn't
+        // passed on to the game.
+        command.process_group(0);
+    }
 }
 
 fn uri_command(uri: &str) -> Command {

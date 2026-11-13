@@ -37,13 +37,13 @@ pub struct GamePageState {
 }
 
 impl GameLibApp {
-    /// The small ▾ next to Launch: pick a profile to launch with.
+    /// The small ▼ next to Launch: pick a profile to launch with.
     pub fn launch_menu(&mut self, ui: &mut egui::Ui, game: &Game, enabled: bool) {
         let list = self.db.launch_profiles(game.id).unwrap_or_default();
         if list.is_empty() {
             return;
         }
-        let button = egui::Button::new(egui::RichText::new("▾").size(20.0))
+        let button = egui::Button::new(egui::RichText::new("▼").size(13.0))
             .min_size(vec2(44.0, 56.0))
             .corner_radius(14.0);
         ui.add_enabled_ui(enabled, |ui| {
@@ -87,7 +87,7 @@ impl GameLibApp {
                     ));
                 } else {
                     ui.label(paint::muted(
-                        "Named sets of launch options, like \"Windowed\" (-windowed). Pick one with ▾ next to Launch.",
+                        "Named sets of launch options, like \"Windowed\" (-windowed). Pick one with ▼ next to Launch.",
                         &theme,
                     ));
                 }

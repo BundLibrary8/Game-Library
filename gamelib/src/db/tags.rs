@@ -135,6 +135,18 @@ impl Db {
     }
 
     /// How many games carry this tag (for the sidebar counts).
+    /// How many games carry each tag, in one query. Tags with no games
+    /// are left out.
+    pub fn tag_counts(&self) -> Result<std::collections::HashMap<i64, u64>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT tag_id, COUNT(*) FROM game_tags GROUP BY tag_id")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?.max(0) as u64))
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     pub fn tag_game_count(&self, tag_id: i64) -> Result<u64> {
         let n: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM game_tags WHERE tag_id = ?1",
@@ -160,6 +172,20 @@ mod tests {
             .unwrap()
             .game_id;
         (db, id)
+    }
+
+    #[test]
+    fn tag_counts_match_one_by_one_counts() {
+        let (db, game) = db_with_game();
+        let rpg = db.ensure_tag("RPG", false).unwrap();
+        let empty = db.ensure_tag("Empty", false).unwrap();
+        db.tag_game(game, rpg.id).unwrap();
+        let counts = db.tag_counts().unwrap();
+        assert_eq!(
+            counts.get(&rpg.id).copied(),
+            Some(db.tag_game_count(rpg.id).unwrap())
+        );
+        assert_eq!(counts.get(&empty.id), None);
     }
 
     #[test]

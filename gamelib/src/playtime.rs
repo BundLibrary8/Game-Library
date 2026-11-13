@@ -137,7 +137,69 @@ pub fn step(
 
 /// Is any of these running exes inside the game's folder?
 pub fn is_running_in(watch_dir: &Path, running_exes: &[PathBuf]) -> bool {
-    running_exes.iter().any(|exe| is_inside(exe, watch_dir))
+    running_exes
+        .iter()
+        .any(|exe| is_inside(exe, watch_dir) && !is_helper(exe))
+}
+
+/// Programs that live in game folders but aren't the game: crash
+/// reporters, updaters, installers and anti-cheat services. They can keep
+/// running after the game closes (or start without it), so they don't
+/// count as playing.
+pub fn is_helper(exe: &Path) -> bool {
+    let name = exe
+        .file_stem()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    const HELPERS: [&str; 16] = [
+        "crashpad",
+        "crashreport",
+        "crashhandler",
+        "crash_reporter",
+        "bugsplat",
+        "updater",
+        "uninstall",
+        "unins0",
+        "setup",
+        "redist",
+        "dxsetup",
+        "easyanticheat",
+        "battleye",
+        "beservice",
+        "cefprocess",
+        "webhelper",
+    ];
+    HELPERS.iter().any(|h| name.contains(h)) || name == "vc_redist.x64" || name == "vc_redist.x86"
+}
+
+/// Is this folder specific enough to say "a program in here is this game"?
+/// A drive root or a shared folder like Program Files would match all
+/// sorts of other programs, so those are never watched by the automatic
+/// detection.
+pub fn is_specific_folder(dir: &Path) -> bool {
+    use std::path::Component;
+    let names: Vec<String> = dir
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(name) => Some(name.to_string_lossy().to_lowercase()),
+            _ => None,
+        })
+        .collect();
+    const SHARED: [&str; 9] = [
+        "program files",
+        "program files (x86)",
+        "windows",
+        "users",
+        "games",
+        "steamapps",
+        "common",
+        "epic games",
+        "gog games",
+    ];
+    match names.last() {
+        None => false,
+        Some(last) => names.len() >= 2 && !SHARED.contains(&last.as_str()),
+    }
 }
 
 /// What counts as "the game is running": an exe inside its folder, or an
@@ -174,10 +236,13 @@ impl Watch {
         let Some(name) = &self.process_name else {
             return false;
         };
-        running_exes.iter().any(|exe| {
-            exe.file_name()
-                .is_some_and(|file| file.to_string_lossy().eq_ignore_ascii_case(name))
-        })
+        running_exes
+            .iter()
+            .filter(|exe| !is_helper(exe))
+            .any(|exe| {
+                exe.file_name()
+                    .is_some_and(|file| file.to_string_lossy().eq_ignore_ascii_case(name))
+            })
     }
 }
 
@@ -324,6 +389,23 @@ mod tests {
             last_seen,
             last_checkpoint,
         }
+    }
+
+    #[test]
+    fn helpers_and_shared_folders_are_ignored() {
+        let running = vec![PathBuf::from("/games/ember/UnityCrashHandler64.exe")];
+        assert!(!Watch::folder("/games/ember").matches(&running));
+        assert!(is_helper(Path::new("/g/EasyAntiCheat_EOS.exe")));
+        assert!(!is_helper(Path::new("/g/EldenRing.exe")));
+        assert!(is_specific_folder(Path::new("/games/ember")));
+        assert!(!is_specific_folder(Path::new("/games")));
+        assert!(!is_specific_folder(Path::new("/")));
+        assert!(!is_specific_folder(Path::new(
+            "/home/me/Steam/steamapps/common"
+        )));
+        assert!(is_specific_folder(Path::new(
+            "/home/me/Steam/steamapps/common/Hades"
+        )));
     }
 
     #[test]

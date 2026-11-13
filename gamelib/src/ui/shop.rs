@@ -536,6 +536,12 @@ fn featured_blurb(item_id: &str) -> &'static str {
         "bg_aurora" => "Northern lights drifting behind your whole library.",
         "bg_synthwave_grid" => "A neon sunset and a grid that never stops rolling.",
         "bg_ember" => "Sparks rising through the dark behind your library.",
+        "bg_fireflies" => "Fireflies blinking among the pines under a full moon.",
+        "bg_ocean" => "Light rays and rising bubbles in deep blue water.",
+        "bg_sakura" => "Cherry blossom drifting down at dusk.",
+        "bg_neon_rain" => "Rain falling past the lit windows of a neon city.",
+        "bg_cosmic_nebula" => "Clouds of colour turning slowly in deep space.",
+        "bg_frost" => "Snow falling softly over moonlit mountains.",
         _ => "A living star map behind your whole library.",
     }
 }

@@ -76,7 +76,11 @@ cargo run
    folder under **Settings → Folders to scan** and use **Scan → Scan my
    game folders**.
 3. Click a game to open its page. Press **Launch** to play; playtime is
-   tracked automatically.
+   tracked automatically. GameLib stays open while you play.
+
+Games you start some other way (from Steam, the Start menu, a desktop
+shortcut) are noticed within about 15 seconds and their playtime is
+tracked too. Switch this off under **Settings → Playing games**.
 
 Artwork is found automatically, every time the app starts and after every
 scan, with no key needed. Watch the bar at the bottom for progress. It
@@ -116,7 +120,7 @@ Franchises, Stats, Shop, Library health, Devices and Settings. The TV icon at th
 ### More on a game's page
 
 - **Launch profiles**: named sets of launch options, like "Windowed"
-  (`-windowed`). Tick one to make it the default; pick another with **▾**
+  (`-windowed`). Tick one to make it the default; pick another with **▼**
   next to Launch. Works for games started from an exe and for Steam games
   (other launchers don't take options from outside).
 - **Session journal**: every session, with a note you can add ("beat the
@@ -154,6 +158,15 @@ has to be switched on and nearby to connect. New devices are paired in
 Windows' own Bluetooth settings (there's a button for it). Bluetooth LE-only
 devices, like some mice and fitness trackers, don't appear here; manage
 them in Windows' settings.
+
+### Backgrounds
+
+Pick a background under **Settings → Appearance**; more are in the
+**Shop**. Constellation, Ember and Firefly Forest are free. The others are
+Aurora, Synthwave Grid, Deep Ocean, Sakura, Frost (600 Stardust each), and
+Neon Rain and Cosmic Nebula (800). Every background moves; untick
+**Animated backgrounds** to keep them still. The admin panel can set any
+picture as the background instead.
 
 ### Other settings
 
@@ -216,6 +229,7 @@ switch between the letters and the results).
 | Problem | What to do |
 |---|---|
 | `cargo` is not recognised | Rust isn't installed, or PowerShell was open while it installed. Install it from <https://rustup.rs>, then open a **new** PowerShell window. |
+| GameLib seems to close or vanish when a game starts | The game is in front of it: GameLib is still running (check the taskbar). If it really closed, send the end of `%APPDATA%\gamelib\gamelib.log`, which now records any crash. |
 | The window doesn't open | Run `$env:GAMELIB_RENDERER = "glow"` and then `cargo run` again. |
 | It still looks like an old version | Run the four commands under *Get the latest version*. Make sure you start it with `cargo run`, not an old `gamelib.exe`. |
 | No covers appear | Check you are online, then restart the app or use **Settings → Download missing covers**. A game that isn't on Steam under the same name needs a free SteamGridDB key, entered in Settings. |
@@ -228,7 +242,7 @@ window.
 
 | Command | What it does |
 |---|---|
-| `$env:GAMELIB_THEME = "aurora"` | Shows a look without owning it. Also `constellation`, `ember` or `synthwave`. |
+| `$env:GAMELIB_THEME = "aurora"` | Shows a look without owning it. Also `constellation`, `ember`, `synthwave`, `fireflies`, `ocean`, `sakura`, `rain`, `nebula` or `frost`. |
 | `$env:GAMELIB_RENDERER = "glow"` | Draws with plain OpenGL, for PCs where the window won't open. |
 | `$env:GAMELIB_DATA_DIR = "C:\temp\gamelib-test"` | Keeps the library somewhere else, for experimenting safely. |
 

@@ -22,6 +22,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -63,6 +64,9 @@ pub enum Job {
     ScanDevices,
     /// Connect or disconnect a paired Bluetooth device.
     SetBluetooth { address: u64, connect: bool },
+    /// Switch on (or off) noticing games started outside GameLib (from
+    /// Steam, a desktop shortcut…) and tracking their playtime too.
+    WatchForGames(bool),
     /// Find covers, icons and store info for games that lack them. Games
     /// looked up recently without luck are skipped unless `retry_all`.
     FetchMissingCovers { retry_all: bool },
@@ -208,8 +212,56 @@ impl WorkerConfig {
 /// The UI's handle on the worker thread.
 pub struct Worker {
     jobs: Sender<Job>,
+    /// The fast lane: quick jobs that shouldn't wait behind slow ones.
+    fast: Sender<Job>,
+    stop_watcher: Arc<WatcherSwitches>,
     results: Receiver<WorkerResult>,
     thread: Option<JoinHandle<()>>,
+}
+
+impl Job {
+    /// Jobs that are quick, or that someone is waiting on (Play), go in the
+    /// fast lane so they never queue behind a scan or a long artwork batch.
+    fn is_fast(&self) -> bool {
+        matches!(
+            self,
+            Job::Launch { .. }
+                | Job::SetBluetooth { .. }
+                | Job::ScanDevices
+                | Job::AskClaude { .. }
+                | Job::CheckForUpdates
+                | Job::WatchForGames(_)
+        )
+    }
+}
+
+/// Run jobs from a channel until it closes or says stop. A job that panics
+/// is reported as an error; the thread carries on with the next one.
+fn job_loop(state: WorkerState, jobs: Receiver<Job>) {
+    for job in jobs {
+        if job == Job::Shutdown {
+            break;
+        }
+        let reporter = state.reporter.clone();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| state.run(job)));
+        if let Err(panic) = outcome {
+            let message = panic_text(&panic);
+            log::error!("a background job crashed: {message}");
+            reporter.send(WorkerResult::Error {
+                context: "Something went wrong".to_string(),
+                message,
+            });
+        }
+    }
+}
+
+/// The message inside a panic, if it has one.
+pub fn panic_text(panic: &Box<dyn std::any::Any + Send>) -> String {
+    panic
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "an unexpected error".to_string())
 }
 
 impl Worker {
@@ -236,6 +288,9 @@ impl Worker {
                 .with_context(|| format!("couldn't create {}", dir.display()))?;
         }
         let (job_tx, job_rx) = mpsc::channel::<Job>();
+        let (fast_tx, fast_rx) = mpsc::channel::<Job>();
+        // The fast lane has its own database connection.
+        let fast_db = Db::open(&config.db_path)?;
         let (result_tx, result_rx) = mpsc::channel::<WorkerResult>();
 
         let reporter = Reporter {
@@ -243,6 +298,20 @@ impl Worker {
             wake: Arc::new(wake),
             observe: Arc::new(observe),
         };
+        let tracking = Arc::new(Mutex::new(HashSet::new()));
+        let watcher = Arc::new(WatcherSwitches::default());
+        let fast_state = WorkerState {
+            db: fast_db,
+            config: config.clone(),
+            reporter: reporter.clone(),
+            tracking: Arc::clone(&tracking),
+            watcher: Arc::clone(&watcher),
+        };
+        let stop_watcher = Arc::clone(&watcher);
+        thread::Builder::new()
+            .name("gamelib-fast".into())
+            .spawn(move || job_loop(fast_state, fast_rx))
+            .context("couldn't start the worker thread")?;
         let thread = thread::Builder::new()
             .name("gamelib-worker".into())
             .spawn(move || {
@@ -250,19 +319,17 @@ impl Worker {
                     db,
                     config,
                     reporter,
-                    tracking: Arc::new(Mutex::new(HashSet::new())),
+                    tracking,
+                    watcher,
                 };
-                for job in job_rx {
-                    if job == Job::Shutdown {
-                        break;
-                    }
-                    state.run(job);
-                }
+                job_loop(state, job_rx);
             })
             .context("couldn't start the worker thread")?;
 
         Ok(Worker {
+            stop_watcher,
             jobs: job_tx,
+            fast: fast_tx,
             results: result_rx,
             thread: Some(thread),
         })
@@ -272,7 +339,12 @@ impl Worker {
     pub fn send(&self, job: Job) {
         // The only way this fails is if the worker has stopped, in which
         // case there is nobody to do the job anyway.
-        if self.jobs.send(job).is_err() {
+        let lane = if job.is_fast() {
+            &self.fast
+        } else {
+            &self.jobs
+        };
+        if lane.send(job).is_err() {
             log::warn!("job sent after the worker stopped");
         }
     }
@@ -297,6 +369,8 @@ impl Worker {
     }
 
     fn stop(&mut self) {
+        self.stop_watcher.stopping.store(true, Ordering::Relaxed);
+        let _ = self.fast.send(Job::Shutdown);
         let _ = self.jobs.send(Job::Shutdown);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
@@ -342,7 +416,23 @@ struct WorkerState {
     /// Games whose playtime is being tracked right now, so clicking Play
     /// twice doesn't count the same session twice.
     tracking: Arc<Mutex<HashSet<i64>>>,
+    /// Shared switches for the "games started elsewhere" watcher.
+    watcher: Arc<WatcherSwitches>,
 }
+
+/// Switches for the watcher thread.
+#[derive(Default)]
+struct WatcherSwitches {
+    /// Noticing games started elsewhere is switched on.
+    enabled: AtomicBool,
+    /// The watcher thread has been started (it's only started once).
+    started: AtomicBool,
+    /// GameLib is closing: the watcher stops.
+    stopping: AtomicBool,
+}
+
+/// How often the watcher looks at the running programs, in seconds.
+const WATCH_EVERY: u64 = 15;
 
 impl WorkerState {
     /// Do one job. Errors become an `Error` result; they never stop the
@@ -365,6 +455,7 @@ impl WorkerState {
             Job::CheckForUpdates => "Couldn't check for updates".to_string(),
             Job::ScanDevices => "Couldn't list devices".to_string(),
             Job::SetBluetooth { .. } => "Bluetooth".to_string(),
+            Job::WatchForGames(_) => "Couldn't watch for games".to_string(),
             Job::Shutdown => return,
         };
         let outcome = match job {
@@ -373,6 +464,7 @@ impl WorkerState {
             Job::Import(games) => self.import(&games),
             Job::Launch { game_id, profile } => self.launch(game_id, profile),
             Job::MeasureDisk => self.measure_disk(),
+            Job::WatchForGames(on) => self.watch_for_games(on),
             Job::ScanDevices => {
                 let devices = crate::devices::list_devices().map_err(|e| format!("{e:#}"));
                 let bluetooth = crate::devices::bluetooth_devices().map_err(|e| format!("{e:#}"));
@@ -542,13 +634,95 @@ impl WorkerState {
             );
             return Ok(());
         }
+        self.start_tracking(game_id, watch)?;
+        Ok(())
+    }
+
+    /// Switch the watcher on or off, starting its thread the first time.
+    fn watch_for_games(&self, on: bool) -> Result<()> {
+        self.watcher.enabled.store(on, Ordering::Relaxed);
+        if !on || self.watcher.started.swap(true, Ordering::Relaxed) {
+            return Ok(());
+        }
+        let state = WorkerState {
+            db: Db::open(&self.config.db_path)?,
+            config: self.config.clone(),
+            reporter: self.reporter.clone(),
+            tracking: Arc::clone(&self.tracking),
+            watcher: Arc::clone(&self.watcher),
+        };
+        thread::Builder::new()
+            .name("gamelib-watcher".into())
+            .spawn(move || {
+                let mut system = match sysinfo::System::new() {
+                    Ok(system) => system,
+                    Err(err) => {
+                        log::warn!("can't watch for games: {err}");
+                        return;
+                    }
+                };
+                while !state.watcher.stopping.load(Ordering::Relaxed) {
+                    if state.watcher.enabled.load(Ordering::Relaxed)
+                        && let Err(err) = state.look_for_running_games(&mut system)
+                    {
+                        log::warn!("watching for games: {err:#}");
+                    }
+                    // Sleep in short steps so closing GameLib isn't held up.
+                    for _ in 0..WATCH_EVERY * 4 {
+                        if state.watcher.stopping.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        thread::sleep(std::time::Duration::from_millis(250));
+                    }
+                }
+            })
+            .context("couldn't start watching for games")?;
+        Ok(())
+    }
+
+    /// One look at the running programs: start tracking any library game
+    /// that's running but isn't being tracked.
+    fn look_for_running_games(&self, system: &mut sysinfo::System) -> Result<()> {
+        let running = playtime::running_exes(system);
+        if running.is_empty() {
+            return Ok(());
+        }
+        let extras = self.db.all_extras()?;
+        let tracked = self
+            .tracking
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        for game in self.db.list_games()? {
+            if !game.installed || tracked.contains(&game.id) {
+                continue;
+            }
+            let watch = playtime::Watch {
+                // Only folders that clearly belong to this one game.
+                dir: game
+                    .watch_dir()
+                    .filter(|dir| playtime::is_specific_folder(dir))
+                    .map(|dir| crate::paths::real_path(&dir)),
+                process_name: extras.get(&game.id).and_then(|e| e.process_name.clone()),
+            };
+            if !watch.is_empty() && watch.matches(&running) {
+                log::info!("{} was started outside GameLib; tracking it", game.title);
+                self.start_tracking(game.id, watch)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Track a game's playtime on its own thread until it closes. Returns
+    /// false if it was already being tracked.
+    fn start_tracking(&self, game_id: i64, watch: playtime::Watch) -> Result<bool> {
         if !self
             .tracking
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(game_id)
         {
-            return Ok(()); // already being tracked
+            return Ok(false); // already being tracked
         }
 
         // Tracking lasts as long as the game runs, so it gets its own
@@ -593,7 +767,7 @@ impl WorkerState {
                 }
             })
             .context("couldn't start the playtime tracker")?;
-        Ok(())
+        Ok(true)
     }
 
     fn api_key(&self, key: &str, what: &str) -> Result<String> {

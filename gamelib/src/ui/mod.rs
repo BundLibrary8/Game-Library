@@ -17,6 +17,7 @@
 
 mod admin;
 mod assistant;
+mod backdrops;
 mod couch;
 mod details;
 mod devices;
@@ -81,6 +82,79 @@ const CLOSE_TO_TRAY_KEY: &str = "ui.close_to_tray";
 const ZOOM_KEY: &str = "ui.zoom";
 /// Setting: "1" for high-contrast colours.
 const CONTRAST_KEY: &str = "ui.high_contrast";
+/// Setting: "0" to stop noticing games started outside GameLib.
+const AUTO_DETECT_KEY: &str = "games.auto_detect";
+
+/// A value worked out once and reused until the library changes (or it's
+/// older than `max_age` seconds), so screens don't redo slow work, like
+/// database totals or checking files, on every frame.
+pub struct Memo<T> {
+    generation: u64,
+    at: f64,
+    value: T,
+}
+
+/// Get a remembered value, working it out again with `make` if there isn't
+/// one or it's out of date.
+pub fn memo<T: Clone>(
+    slot: &mut Option<Memo<T>>,
+    generation: u64,
+    time: f64,
+    max_age: f64,
+    make: impl FnOnce() -> T,
+) -> T {
+    let fresh = slot
+        .as_ref()
+        .is_some_and(|m| m.generation == generation && time - m.at < max_age);
+    if !fresh {
+        *slot = Some(Memo {
+            generation,
+            at: time,
+            value: make(),
+        });
+    }
+    slot.as_ref().map(|m| m.value.clone()).expect("just set")
+}
+
+/// Remembered results for the screens that need them.
+#[derive(Default)]
+pub struct Memos {
+    pub health: Option<Memo<HealthNow>>,
+    pub stats: Option<Memo<std::rc::Rc<StatsNumbers>>>,
+    pub goals: Option<Memo<GoalsNow>>,
+}
+
+/// The health report, and each game's measured size.
+pub type HealthNow = std::rc::Rc<(gamelib::health::Report, HashMap<i64, u64>)>;
+
+/// The numbers the Stats screen shows.
+pub struct StatsNumbers {
+    pub top: Vec<Game>,
+    pub weekly: Vec<u64>,
+    pub last_30: u64,
+    pub heatmap: HashMap<i64, u64>,
+}
+
+/// Goal progress, for Home and the "goal reached" pop-up.
+#[derive(Clone, Default)]
+pub struct GoalsNow {
+    pub weekly: Option<(gamelib::journal::WeeklyGoal, gamelib::journal::Progress)>,
+    pub games: Vec<(i64, gamelib::journal::Progress)>,
+}
+
+impl GameLibApp {
+    /// Goal progress, worked out at most every 30 seconds or when the
+    /// library changes.
+    pub fn goals_now(&mut self, time: f64) -> GoalsNow {
+        let db = &self.db;
+        memo(&mut self.memos.goals, self.generation, time, 30.0, || {
+            GoalsNow {
+                weekly: db.weekly_progress(now(), local_offset()).ok().flatten(),
+                games: db.game_goals().unwrap_or_default(),
+            }
+        })
+    }
+}
 
 /// This computer's offset from UTC, in seconds, for showing times locally.
 pub fn local_offset() -> i32 {
@@ -223,11 +297,15 @@ impl Data {
         let hidden_count = everything.iter().filter(|g| g.hidden).count();
         let visible: Vec<Game> = everything.into_iter().filter(|g| !g.hidden).collect();
 
-        let mut tags = Vec::new();
-        for tag in db.list_tags()? {
-            let count = db.tag_game_count(tag.id)?;
-            tags.push((tag, count));
-        }
+        let counts = db.tag_counts()?;
+        let tags: Vec<(Tag, u64)> = db
+            .list_tags()?
+            .into_iter()
+            .map(|tag| {
+                let count = counts.get(&tag.id).copied().unwrap_or(0);
+                (tag, count)
+            })
+            .collect();
         let extras = db.all_extras()?;
         // Tags describe a game ("Roguelite"), so they count as tastes.
         // Collections ("Backlog", "Finished") are just piles, so they don't.
@@ -379,6 +457,14 @@ pub struct GameLibApp {
     game_page: game_more::GamePageState,
     /// The Ctrl+K command palette.
     palette: palette::Palette,
+    /// Reload the data within a couple of seconds (artwork arriving).
+    reload_soon: bool,
+    /// When the data was last loaded (egui's clock).
+    loaded_at: f64,
+    /// Goes up by one every time the data is reloaded, so remembered
+    /// results know when they're out of date.
+    generation: u64,
+    memos: Memos,
     /// What the Devices screen found.
     devices: devices::DevicesState,
     /// Notification settings shared with the worker threads.
@@ -409,6 +495,18 @@ pub struct GameLibApp {
 
 /// Open the window and run until it is closed.
 pub fn run(start_screen: Option<&str>) -> Result<()> {
+    // Write every crash (on any thread) to gamelib.log with where it
+    // happened, as well as to the console.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = std::thread::current();
+        log::error!(
+            "crash on thread '{}': {info}\n{}",
+            thread.name().unwrap_or("unnamed"),
+            std::backtrace::Backtrace::force_capture()
+        );
+        default_hook(info);
+    }));
     // `gamelib ui couch` opens straight into Couch Mode.
     let start_couch = start_screen == Some("couch");
     let screen = match start_screen.filter(|name| *name != "couch") {
@@ -498,6 +596,12 @@ impl GameLibApp {
             Ok("aurora") => Some(Backdrop::Aurora),
             Ok("synthwave") => Some(Backdrop::Synthwave),
             Ok("ember") => Some(Backdrop::Ember),
+            Ok("fireflies") => Some(Backdrop::Fireflies),
+            Ok("ocean") => Some(Backdrop::Ocean),
+            Ok("sakura") => Some(Backdrop::Sakura),
+            Ok("rain") => Some(Backdrop::Rain),
+            Ok("nebula") => Some(Backdrop::Nebula),
+            Ok("frost") => Some(Backdrop::Frost),
             _ => None,
         };
         let settings = SettingsInputs {
@@ -521,6 +625,10 @@ impl GameLibApp {
             admin: admin::AdminState::default(),
             game_page: game_more::GamePageState::default(),
             palette: palette::Palette::default(),
+            reload_soon: false,
+            loaded_at: 0.0,
+            generation: 0,
+            memos: Memos::default(),
             devices: devices::DevicesState::default(),
             shared,
             toasts: Vec::new(),
@@ -571,6 +679,11 @@ impl GameLibApp {
             // Full screen is asked for on the first frame (there's no window yet).
             app.couch = Some(couch::Couch::new());
             app.couch_fullscreen_pending = true;
+        }
+        // Notice games started from Steam, shortcuts and so on, and track
+        // their playtime too.
+        if app.db.get_bool_setting(AUTO_DETECT_KEY, true)? {
+            app.worker.send(Job::WatchForGames(true));
         }
         if app.db.get_bool_setting(keys::SCAN_ON_STARTUP, false)? {
             // The scan looks for artwork itself when it finishes.
@@ -673,7 +786,26 @@ impl GameLibApp {
     /// `try_recv` never waits, so this can't freeze the window.
     fn handle_worker_results(&mut self, ctx: &egui::Context) {
         while let Some(result) = self.worker.try_recv() {
-            self.dirty = true;
+            // Reloading everything from the database is the slowest thing
+            // the window does, so only results that change the library
+            // ask for it. Artwork, which arrives a game at a time during a
+            // big batch, asks for a reload "soon" (at most every couple of
+            // seconds) instead of one per picture.
+            match &result {
+                WorkerResult::CoverReady { .. }
+                | WorkerResult::IconReady { .. }
+                | WorkerResult::InfoReady { .. } => self.reload_soon = true,
+                WorkerResult::FolderCandidates(_)
+                | WorkerResult::CoverProgress { .. }
+                | WorkerResult::DevicesFound { .. }
+                | WorkerResult::BluetoothChanged { .. }
+                | WorkerResult::DiskProgress { .. }
+                | WorkerResult::UpdateChecked(_)
+                | WorkerResult::AssistantReply(_)
+                | WorkerResult::SessionStarted { .. }
+                | WorkerResult::NeverStarted { .. } => {}
+                _ => self.dirty = true,
+            }
             match result {
                 WorkerResult::ScanFinished(report) => {
                     self.job_done();
@@ -715,7 +847,11 @@ impl GameLibApp {
                     };
                 }
                 WorkerResult::SessionStarted { game_id } => {
-                    self.running.insert(game_id);
+                    if self.running.insert(game_id) {
+                        // Not started from GameLib: the watcher noticed it.
+                        let title = self.title_of(game_id);
+                        self.toast(&title, "Noticed it running. Tracking your playtime.");
+                    }
                     self.status = format!(
                         "{} is running. Playtime is being tracked.",
                         self.title_of(game_id)
@@ -1088,11 +1224,47 @@ impl eframe::App for GameLibApp {
         }
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    /// Draw a frame. If anything in it goes wrong (a bug), the window
+    /// stays open: the problem is written to the log and shown as an
+    /// error, and the next frame carries on as normal.
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.draw_frame(ui, frame);
+        }));
+        if let Err(panic) = outcome {
+            let message = gamelib::worker::panic_text(&panic);
+            log::error!("a frame crashed: {message}");
+            self.error = Some(format!(
+                "Something went wrong ({message}). GameLib kept going; details are in gamelib.log."
+            ));
+            // Start the next frame from fresh data and the home screen,
+            // in case the screen itself is what's broken.
+            self.dirty = true;
+            self.dialog = Dialog::None;
+            if !matches!(self.screen, Screen::Home | Screen::Library) {
+                self.screen = Screen::Library;
+            }
+        }
+    }
+}
+
+impl GameLibApp {
+    fn draw_frame(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_worker_results(&ctx);
+        let now_time = ctx.input(|i| i.time);
+        if self.reload_soon {
+            if now_time - self.loaded_at >= 2.0 {
+                self.dirty = true;
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_millis(500));
+            }
+        }
         if self.dirty {
             self.dirty = false;
+            self.reload_soon = false;
+            self.loaded_at = now_time;
+            self.generation += 1;
             match Data::load(&self.db, self.filter, &self.search, self.sort) {
                 Ok(data) => self.data = data,
                 Err(err) => self.error = Some(format!("{err:#}")),

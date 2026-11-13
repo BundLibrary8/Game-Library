@@ -15,22 +15,43 @@ const SECS_PER_DAY: i64 = 86_400;
 impl GameLibApp {
     pub fn stats_screen(&mut self, ui: &mut egui::Ui) {
         let theme = self.theme;
-        let loaded = (|| -> anyhow::Result<_> {
-            let now = now();
-            let month = self.db.playtime_by_day(now - 30 * SECS_PER_DAY, now + 1)?;
-            Ok((
-                self.db.top_played(10)?,
-                self.db.weekly_playtime(None, now, 12)?,
-                month.iter().map(|d| d.secs).sum::<u64>(),
-            ))
-        })();
-        let (top, weekly, last_30) = match loaded {
-            Ok(values) => values,
-            Err(err) => {
-                ui.colored_label(theme.danger, format!("{err:#}"));
-                return;
-            }
-        };
+        // The totals come from the play history, so they're worked out
+        // when the library changes (or once a minute), not every frame.
+        let time = ui.input(|i| i.time);
+        let db = &self.db;
+        let mut failed = None;
+        let numbers = super::memo(&mut self.memos.stats, self.generation, time, 60.0, || {
+            let loaded = (|| -> anyhow::Result<super::StatsNumbers> {
+                let now = now();
+                let month = db.playtime_by_day(now - 30 * SECS_PER_DAY, now + 1)?;
+                let days =
+                    db.playtime_by_day(now - HEATMAP_WEEKS as i64 * 7 * SECS_PER_DAY, now + 1)?;
+                Ok(super::StatsNumbers {
+                    top: db.top_played(10)?,
+                    weekly: db.weekly_playtime(None, now, 12)?,
+                    last_30: month.iter().map(|d| d.secs).sum::<u64>(),
+                    heatmap: days
+                        .iter()
+                        .map(|d| (d.day_start / SECS_PER_DAY, d.secs))
+                        .collect(),
+                })
+            })();
+            std::rc::Rc::new(loaded.unwrap_or_else(|err| {
+                failed = Some(format!("{err:#}"));
+                super::StatsNumbers {
+                    top: Vec::new(),
+                    weekly: vec![0; 12],
+                    last_30: 0,
+                    heatmap: Default::default(),
+                }
+            }))
+        });
+        if let Some(err) = failed {
+            self.memos.stats = None;
+            ui.colored_label(theme.danger, err);
+            return;
+        }
+        let (top, weekly, last_30) = (numbers.top.clone(), numbers.weekly.clone(), numbers.last_30);
         let stats = self.data.stats.clone();
         let never_played = self
             .data
@@ -157,13 +178,8 @@ impl GameLibApp {
                 });
                 ui.add_space(4.0);
                 let now = now();
-                let days = self
-                    .db
-                    .playtime_by_day(now - HEATMAP_WEEKS as i64 * 7 * SECS_PER_DAY, now + 1)
-                    .unwrap_or_default();
-                let by_day: std::collections::HashMap<i64, u64> =
-                    days.iter().map(|d| (d.day_start / SECS_PER_DAY, d.secs)).collect();
-                heatmap(ui, &theme, &by_day, now / SECS_PER_DAY, half - 38.0);
+                let by_day = &numbers.heatmap;
+                heatmap(ui, &theme, by_day, now / SECS_PER_DAY, half - 38.0);
                 let active = by_day.values().filter(|secs| **secs > 0).count();
                 ui.label(paint::muted(format!("You played on {active} days."), &theme).size(13.5));
             });

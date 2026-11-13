@@ -62,7 +62,12 @@ pub const FOUNDER_BADGE_ID: &str = "badge_founder";
 /// The library background used when none has been chosen.
 pub const DEFAULT_BACKGROUND_ID: &str = "bg_constellation";
 /// Items everyone owns without buying or earning them.
-pub const FREE_ITEMS: &[&str] = &[FOUNDER_BADGE_ID, DEFAULT_BACKGROUND_ID, "bg_ember"];
+pub const FREE_ITEMS: &[&str] = &[
+    FOUNDER_BADGE_ID,
+    DEFAULT_BACKGROUND_ID,
+    "bg_ember",
+    "bg_fireflies",
+];
 
 /// Everything that exists. Built into the app: adding items means releasing
 /// a new version. **Never change an `id`**, because saved data refers to it.
@@ -87,6 +92,37 @@ pub const CATALOGUE: &[ShopItem] = &[
         ItemKind::LibraryBackground,
         Some(600),
     ),
+    item(
+        "bg_fireflies",
+        "Firefly Forest",
+        ItemKind::LibraryBackground,
+        None,
+    ),
+    item(
+        "bg_ocean",
+        "Deep Ocean",
+        ItemKind::LibraryBackground,
+        Some(600),
+    ),
+    item(
+        "bg_sakura",
+        "Sakura",
+        ItemKind::LibraryBackground,
+        Some(600),
+    ),
+    item(
+        "bg_neon_rain",
+        "Neon Rain",
+        ItemKind::LibraryBackground,
+        Some(800),
+    ),
+    item(
+        "bg_cosmic_nebula",
+        "Cosmic Nebula",
+        ItemKind::LibraryBackground,
+        Some(800),
+    ),
+    item("bg_frost", "Frost", ItemKind::LibraryBackground, Some(600)),
     item(
         "banner_nebula",
         "Nebula",
