@@ -63,7 +63,10 @@ fn launching_a_real_process_records_its_playtime() {
         },
     };
     let worker = Worker::spawn(config, || {}).unwrap();
-    worker.send(Job::Launch { game_id });
+    worker.send(Job::Launch {
+        game_id,
+        profile: gamelib::worker::ProfileChoice::Default,
+    });
 
     let mut started = false;
     let summary = loop {

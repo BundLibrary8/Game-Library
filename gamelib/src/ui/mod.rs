@@ -23,9 +23,13 @@ mod dialogs;
 mod discover;
 mod franchises;
 mod game_extras;
+mod game_more;
+mod health;
 mod home;
 mod library;
+mod notify;
 mod paint;
+mod palette;
 mod profile;
 mod settings;
 mod shop;
@@ -66,6 +70,16 @@ const COUCH_KEY: &str = "ui.start_couch";
 const ANIMATE_KEY: &str = "ui.animate";
 /// Setting: "0" to skip the loading animation on startup.
 const SPLASH_KEY: &str = "ui.splash";
+/// Setting: "0" to switch desktop notifications off.
+const NOTIFY_KEY: &str = "ui.notifications";
+/// Setting: "0" to keep GameLib out of the system tray.
+const TRAY_KEY: &str = "ui.tray";
+/// Setting: "1" to keep running in the tray when the window is closed.
+const CLOSE_TO_TRAY_KEY: &str = "ui.close_to_tray";
+/// Setting: the text size, as a zoom factor like "1.25".
+const ZOOM_KEY: &str = "ui.zoom";
+/// Setting: "1" for high-contrast colours.
+const CONTRAST_KEY: &str = "ui.high_contrast";
 
 /// This computer's offset from UTC, in seconds, for showing times locally.
 pub fn local_offset() -> i32 {
@@ -87,6 +101,8 @@ pub enum Screen {
     Wrapped(i32),
     /// The password-protected admin panel.
     Admin,
+    /// Install checks, disk space and things to tidy up.
+    Health,
     Franchises,
     Stats,
     Profile,
@@ -104,6 +120,7 @@ impl Screen {
             "franchises" => Screen::Franchises,
             "stats" => Screen::Stats,
             "admin" => Screen::Admin,
+            "health" => Screen::Health,
             "wrapped" => Screen::Wrapped(gamelib::patterns::year_of(now(), local_offset())),
             "profile" => Screen::Profile,
             "shop" => Screen::Shop,
@@ -354,6 +371,31 @@ pub struct GameLibApp {
     splash: Option<splash::Splash>,
     /// The admin panel's lock and inputs.
     admin: admin::AdminState,
+    /// Launch profile, journal and screenshot state for game pages.
+    game_page: game_more::GamePageState,
+    /// The Ctrl+K command palette.
+    palette: palette::Palette,
+    /// Notification settings shared with the worker threads.
+    shared: notify::Shared,
+    /// Pop-ups in the corner of the window.
+    toasts: Vec<notify::Toast>,
+    /// The icon in the system tray (Windows).
+    tray: Option<notify::Tray>,
+    /// Set by the tray menu's "Couch Mode".
+    tray_couch: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Closing the window hides it in the tray instead of quitting.
+    close_to_tray: bool,
+    /// Said once that GameLib is still running in the tray.
+    told_about_tray: bool,
+    /// The text size, if changed from normal.
+    zoom: Option<f32>,
+    high_contrast: bool,
+    /// Achievements already unlocked, so new ones can be announced.
+    unlocked_seen: Option<HashSet<&'static str>>,
+    /// The week whose goal has already been announced.
+    goal_noticed: Option<i64>,
+    /// A newer version, found by checking for updates.
+    update: Option<gamelib::updates::Release>,
     /// The clock the backgrounds are drawn at this frame, or `None` when
     /// they are standing still.
     anim_time: Option<f64>,
@@ -370,6 +412,7 @@ pub fn run(start_screen: Option<&str>) -> Result<()> {
         None => Screen::Library,
     };
     let db = Db::open(&paths::db_path()?)?;
+    let shared = notify::Shared::new(db.get_bool_setting(NOTIFY_KEY, true)?);
     let config = WorkerConfig::from_default_paths()?;
 
     // Normally the window is drawn with the graphics card's modern API.
@@ -397,15 +440,33 @@ pub fn run(start_screen: Option<&str>) -> Result<()> {
             // The worker wakes the window whenever it has a result, so the
             // screen updates even if the mouse isn't moving.
             let ctx = cc.egui_ctx.clone();
-            let worker = Worker::spawn(config, move || ctx.request_repaint())?;
-            Ok(Box::new(GameLibApp::new(db, worker, screen, start_couch)?))
+            let observer = shared.clone();
+            let worker = Worker::spawn_observed(
+                config,
+                move || ctx.request_repaint(),
+                move |result| observer.observe(result),
+            )?;
+            let mut app = GameLibApp::new(db, worker, screen, start_couch, shared)?;
+            if app.db.get_bool_setting(TRAY_KEY, true)? {
+                app.start_tray(&cc.egui_ctx);
+            }
+            if let Some(zoom) = app.zoom {
+                cc.egui_ctx.set_zoom_factor(zoom);
+            }
+            Ok(Box::new(app))
         }),
     )
     .map_err(|err| anyhow::anyhow!("the window couldn't be opened: {err}"))
 }
 
 impl GameLibApp {
-    fn new(db: Db, worker: Worker, screen: Screen, start_couch: bool) -> Result<GameLibApp> {
+    fn new(
+        db: Db,
+        worker: Worker,
+        screen: Screen,
+        start_couch: bool,
+        shared: notify::Shared,
+    ) -> Result<GameLibApp> {
         // Count any playtime left over from a crash, and make sure the
         // profile exists.
         db.recover_unfinished_sessions()?;
@@ -452,6 +513,22 @@ impl GameLibApp {
             data: Data::load(&db, Filter::All, "", SortBy::LastPlayed)?,
             animate: db.get_bool_setting(ANIMATE_KEY, true)?,
             admin: admin::AdminState::default(),
+            game_page: game_more::GamePageState::default(),
+            palette: palette::Palette::default(),
+            shared,
+            toasts: Vec::new(),
+            tray: None,
+            tray_couch: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            close_to_tray: db.get_bool_setting(CLOSE_TO_TRAY_KEY, false)?,
+            told_about_tray: false,
+            zoom: db
+                .get_setting(ZOOM_KEY)?
+                .and_then(|z| z.parse::<f32>().ok())
+                .filter(|z| (0.6..=2.0).contains(z)),
+            high_contrast: db.get_bool_setting(CONTRAST_KEY, false)?,
+            unlocked_seen: None,
+            goal_noticed: None,
+            update: None,
             splash: db
                 .get_bool_setting(SPLASH_KEY, true)?
                 .then(splash::Splash::new),
@@ -550,10 +627,16 @@ impl GameLibApp {
         self.dirty = true;
     }
 
-    /// Start a game (unless it's already running).
+    /// Start a game (unless it's already running), with its default
+    /// launch profile.
     fn play(&mut self, game_id: i64) {
+        self.play_with(game_id, gamelib::worker::ProfileChoice::Default);
+    }
+
+    /// Start a game with a chosen launch profile.
+    fn play_with(&mut self, game_id: i64, profile: gamelib::worker::ProfileChoice) {
         if self.running.insert(game_id) {
-            self.start_job(Job::Launch { game_id }, "Starting…");
+            self.start_job(Job::Launch { game_id, profile }, "Starting…");
         }
     }
 
@@ -648,6 +731,11 @@ impl GameLibApp {
                         self.status
                             .push_str(" Something new unlocked on your profile!");
                     }
+                    let title = self.title_of(summary.game_id);
+                    self.toast(
+                        &title,
+                        &notify::session_text(summary.duration_secs, summary.stardust),
+                    );
                 }
                 WorkerResult::NeverStarted { game_id } => {
                     self.running.remove(&game_id);
@@ -685,6 +773,39 @@ impl GameLibApp {
                     self.job_done();
                     self.status = format!("Friends updated ({}).", friends.len());
                 }
+                WorkerResult::DiskProgress { done, total } => {
+                    self.status = format!("Measuring disk space… {done} of {total}");
+                }
+                WorkerResult::DiskMeasured { games, bytes } => {
+                    self.job_done();
+                    self.status = format!(
+                        "Measured {games} games: {} in all.",
+                        gamelib::health::format_bytes(bytes)
+                    );
+                }
+                WorkerResult::UpdateChecked(result) => {
+                    self.job_done();
+                    match result {
+                        Ok(gamelib::updates::UpdateCheck::Available(release)) => {
+                            self.toast(
+                                &format!("GameLib {} is out", release.version),
+                                "See Settings → Updates to get it.",
+                            );
+                            self.status = format!("GameLib {} is available.", release.version);
+                            self.update = Some(release);
+                        }
+                        Ok(gamelib::updates::UpdateCheck::UpToDate) => {
+                            self.status = format!(
+                                "You have the newest version ({}).",
+                                gamelib::updates::VERSION
+                            );
+                        }
+                        Ok(gamelib::updates::UpdateCheck::NoReleases) => {
+                            self.status = "No releases have been published yet.".to_string();
+                        }
+                        Err(err) => self.error = Some(format!("Couldn't check for updates: {err}")),
+                    }
+                }
                 WorkerResult::AssistantReply(reply) => {
                     self.job_done();
                     self.status.clear();
@@ -714,7 +835,11 @@ impl GameLibApp {
             .hint_text(hint)
             .desired_width(width)
             .margin(egui::Margin::symmetric(14, 9));
-        if ui.add(edit).changed() {
+        let response = ui.add(edit);
+        if std::mem::take(&mut self.palette.focus_search) {
+            response.request_focus();
+        }
+        if response.changed() {
             self.screen = Screen::Library;
             self.dirty = true;
         }
@@ -815,6 +940,7 @@ impl GameLibApp {
                 (Screen::Franchises, Icon::Franchises, "Franchises"),
                 (Screen::Stats, Icon::Stats, "Stats"),
                 (Screen::Shop, Icon::Shop, "Shop"),
+                (Screen::Health, Icon::Health, "Library health"),
                 (Screen::Settings, Icon::Settings, "Settings"),
             ] {
                 let selected = self.screen == screen
@@ -949,7 +1075,10 @@ impl eframe::App for GameLibApp {
         }
 
         // Pick the look, and tell egui when it changes.
-        let theme = Theme::for_backdrop(self.current_backdrop());
+        let mut theme = Theme::for_backdrop(self.current_backdrop());
+        if self.high_contrast {
+            theme = theme.high_contrast();
+        }
         if theme != self.theme || !self.theme_applied {
             self.theme = theme;
             self.theme_applied = true;
@@ -969,6 +1098,8 @@ impl eframe::App for GameLibApp {
         {
             self.splash = None;
         }
+
+        self.window_events(&ctx, time);
 
         // Controllers, and Couch Mode, which takes over the whole window.
         let pad_input = self.pad.poll(time);
@@ -1066,6 +1197,7 @@ impl eframe::App for GameLibApp {
                                     Screen::Assistant => self.assistant_screen(ui),
                                     Screen::Wrapped(year) => self.wrapped_screen(ui, year),
                                     Screen::Admin => self.admin_screen(ui),
+                                    Screen::Health => self.health_screen(ui),
                                     Screen::Franchises => self.franchises_screen(ui),
                                     Screen::Stats => self.stats_screen(ui),
                                     Screen::Profile => self.profile_screen(ui),
@@ -1078,5 +1210,8 @@ impl eframe::App for GameLibApp {
             });
 
         self.show_dialog(&ctx);
+        self.screenshot_viewer(&ctx);
+        self.palette_window(&ctx);
+        notify::draw_toasts(&ctx, &self.theme, &mut self.toasts, time);
     }
 }

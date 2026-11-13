@@ -98,6 +98,7 @@ impl GameLibApp {
                     if launch.clicked() {
                         self.play(game_id);
                     }
+                    self.launch_menu(ui, &game, game.installed && !running);
 
                     let star_colour = if game.favourite {
                         Color32::from_rgb(0xff, 0xcf, 0x4a)
@@ -190,6 +191,10 @@ impl GameLibApp {
         ui.add_space(18.0);
         self.notes_panel(ui, &game, &extras);
         ui.add_space(14.0);
+        self.launch_and_journal_panel(ui, &game);
+        ui.add_space(14.0);
+        self.screenshots_panel(ui, &game);
+        ui.add_space(14.0);
         self.requirements_panel(ui, &game, &extras);
         ui.add_space(18.0);
         self.saves_and_mods_panel(ui, &game, &extras);
@@ -224,12 +229,7 @@ impl GameLibApp {
             ui.close();
         }
         if matches!(game.launch, LaunchTarget::Exe { .. }) && ui.button("Locate exe…").clicked() {
-            if let Some(exe) = rfd::FileDialog::new()
-                .set_title("Where is the game's exe?")
-                .pick_file()
-            {
-                self.check(self.db.set_launch(id, &LaunchTarget::exe(exe)));
-            }
+            self.locate_exe(id);
             ui.close();
         }
         ui.separator();

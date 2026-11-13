@@ -131,7 +131,10 @@ pub fn run(args: &[String]) -> Result<()> {
         "launch" => {
             let game = db.require_game(game_id(rest)?)?;
             let worker = start_worker()?;
-            worker.send(Job::Launch { game_id: game.id });
+            worker.send(Job::Launch {
+                game_id: game.id,
+                profile: gamelib::worker::ProfileChoice::Default,
+            });
             println!("Starting {}…", game.title);
             loop {
                 // A play session has no time limit, so wait as long as it takes.

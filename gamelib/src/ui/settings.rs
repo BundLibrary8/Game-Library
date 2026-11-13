@@ -8,7 +8,10 @@ use gamelib::shop::{self, ItemKind};
 use gamelib::worker::Job;
 
 use super::theme::{bold, source_name};
-use super::{ANIMATE_KEY, COUCH_KEY, GameLibApp, SPLASH_KEY, paint};
+use super::{
+    ANIMATE_KEY, CLOSE_TO_TRAY_KEY, CONTRAST_KEY, COUCH_KEY, GameLibApp, NOTIFY_KEY, SPLASH_KEY,
+    TRAY_KEY, paint,
+};
 
 impl GameLibApp {
     pub fn settings_screen(&mut self, ui: &mut egui::Ui) {
@@ -230,6 +233,46 @@ impl GameLibApp {
                         self.status = format!("Exported {count} games to {}.", file.display());
                     }
                 }
+                if ui.button("Export CSV…").on_hover_text("A spreadsheet of your games: open it in Excel or Google Sheets").clicked()
+                    && let Some(file) = rfd::FileDialog::new()
+                        .set_title("Save your library as a spreadsheet")
+                        .set_file_name("gamelib-library.csv")
+                        .add_filter("Spreadsheet (CSV)", &["csv"])
+                        .save_file()
+                {
+                    let saved = self
+                        .db
+                        .export_csv()
+                        .and_then(|text| gamelib::csvio::write_csv(&text, &file));
+                    if self.check(saved).is_some() {
+                        self.status = format!("Saved {}.", file.display());
+                    }
+                }
+                if ui
+                    .button("Import CSV…")
+                    .on_hover_text("Columns are matched by name: title (needed), status, rating, hours_played, hours_to_beat, favourite, tags, notes, exe")
+                    .clicked()
+                    && let Some(file) = rfd::FileDialog::new()
+                        .set_title("Choose a spreadsheet (CSV) to import")
+                        .add_filter("Spreadsheet (CSV)", &["csv"])
+                        .pick_file()
+                {
+                    let imported = gamelib::csvio::read_csv(&file)
+                        .and_then(|text| self.db.import_csv(&text, gamelib::now()));
+                    if let Some(summary) = self.check(imported) {
+                        self.status = format!(
+                            "CSV imported: {} updated, {} added, {} skipped.",
+                            summary.updated, summary.added, summary.skipped
+                        );
+                        if !summary.not_found.is_empty() {
+                            self.status.push_str(&format!(
+                                " Not in your library: {}.",
+                                summary.not_found.iter().take(5).cloned().collect::<Vec<_>>().join(", ")
+                            ));
+                        }
+                        self.dirty = true;
+                    }
+                }
                 if ui.button("Import library…").clicked()
                     && let Some(file) = rfd::FileDialog::new()
                         .set_title("Choose a GameLib library file")
@@ -246,6 +289,160 @@ impl GameLibApp {
                     }
                 }
             });
+        });
+        ui.add_space(14.0);
+
+        theme.panel_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(paint::strong("Accessibility", 17.0));
+            ui.horizontal(|ui| {
+                ui.label("Text size");
+                let mut zoom = ui.ctx().zoom_factor();
+                if ui
+                    .add(egui::Slider::new(&mut zoom, 0.75..=1.75).step_by(0.05).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)))
+                    .changed()
+                {
+                    ui.ctx().set_zoom_factor(zoom);
+                }
+                ui.label(paint::muted("(also Ctrl + and Ctrl -, Ctrl 0 to reset)", &theme));
+            });
+            let mut contrast = self.high_contrast;
+            if ui
+                .checkbox(&mut contrast, "High contrast (brighter text, solid panels)")
+                .changed()
+            {
+                self.high_contrast = contrast;
+                self.check(self.db.set_bool_setting(CONTRAST_KEY, contrast));
+            }
+            ui.label(paint::muted(
+                "To cut down movement, untick Animated backgrounds and Loading animation under Appearance. Press F1 for keyboard shortcuts.",
+                &theme,
+            ));
+        });
+        ui.add_space(14.0);
+
+        theme.panel_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(paint::strong("Notifications and tray", 17.0));
+            let mut desktop = self.db.get_bool_setting(NOTIFY_KEY, true).unwrap_or(true);
+            if ui
+                .checkbox(&mut desktop, "Desktop notifications when GameLib isn't in front (a game closes, an achievement, a goal)")
+                .changed()
+            {
+                self.shared.desktop.store(desktop, std::sync::atomic::Ordering::Relaxed);
+                self.check(self.db.set_bool_setting(NOTIFY_KEY, desktop));
+            }
+            if cfg!(windows) {
+                let mut tray = self.tray.is_some();
+                if ui.checkbox(&mut tray, "Show GameLib in the system tray").changed() {
+                    self.check(self.db.set_bool_setting(TRAY_KEY, tray));
+                    if tray {
+                        let ctx = ui.ctx().clone();
+                        self.start_tray(&ctx);
+                    } else {
+                        self.stop_tray();
+                    }
+                }
+                let mut close = self.close_to_tray;
+                if ui
+                    .add_enabled(
+                        self.tray.is_some(),
+                        egui::Checkbox::new(&mut close, "Closing the window keeps GameLib running in the tray"),
+                    )
+                    .changed()
+                {
+                    self.close_to_tray = close;
+                    self.check(self.db.set_bool_setting(CLOSE_TO_TRAY_KEY, close));
+                }
+            } else {
+                ui.label(paint::muted("The system tray icon is only on Windows.", &theme));
+            }
+        });
+        ui.add_space(14.0);
+
+        theme.panel_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(paint::strong("Weekly playtime goal", 17.0));
+            let goal = self.db.weekly_goal().ok().flatten();
+            let mut hours = goal.map(|g| g.minutes as f32 / 60.0).unwrap_or(0.0);
+            let mut is_limit = goal.is_some_and(|g| g.is_limit);
+            let mut changed = false;
+            ui.horizontal(|ui| {
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut hours, 0.0..=60.0)
+                            .step_by(1.0)
+                            .suffix(" hours a week"),
+                    )
+                    .on_hover_text("0 means no goal")
+                    .changed();
+                changed |= ui
+                    .checkbox(&mut is_limit, "It's a limit, not a target")
+                    .changed();
+            });
+            if changed {
+                let new = (hours >= 1.0).then_some(gamelib::journal::WeeklyGoal {
+                    minutes: (hours * 60.0) as u32,
+                    is_limit,
+                });
+                self.check(self.db.set_weekly_goal(new));
+            }
+            if let Ok(Some((goal, progress))) = self
+                .db
+                .weekly_progress(gamelib::now(), super::local_offset())
+            {
+                let colour = match (goal.is_limit, progress.reached()) {
+                    (true, true) => theme.danger,
+                    (false, true) => theme.success,
+                    _ => theme.accent,
+                };
+                paint::bar(ui, &theme, progress.fraction(), colour, 360.0);
+                ui.label(paint::muted(
+                    format!(
+                        "This week: {:.1} of {} hours",
+                        progress.done_minutes as f32 / 60.0,
+                        goal.minutes / 60
+                    ),
+                    &theme,
+                ));
+            }
+        });
+        ui.add_space(14.0);
+
+        theme.panel_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(paint::strong("Updates", 17.0));
+            ui.label(format!("This is GameLib {}.", gamelib::updates::VERSION));
+            ui.horizontal(|ui| {
+                if ui.button("Check for updates").clicked() {
+                    self.start_job(gamelib::worker::Job::CheckForUpdates, "Checking for updates…");
+                }
+                if ui.button("Release notes").clicked() {
+                    let url = format!("https://github.com/{}/releases", gamelib::updates::REPOSITORY);
+                    self.check(gamelib::launcher::open_link(&url));
+                }
+            });
+            if let Some(release) = self.update.clone() {
+                ui.add_space(6.0);
+                ui.label(paint::strong(format!("GameLib {} is available", release.version), 15.0));
+                if !release.notes.trim().is_empty() {
+                    ui.label(paint::muted(release.notes.chars().take(600).collect::<String>(), &theme));
+                }
+                ui.horizontal(|ui| {
+                    if let Some(download) = &release.download
+                        && ui.button("Download").clicked()
+                    {
+                        self.check(gamelib::launcher::open_link(download));
+                    }
+                    if ui.button("Open the release page").clicked() {
+                        self.check(gamelib::launcher::open_link(&release.url));
+                    }
+                });
+                ui.label(paint::muted(
+                    "To update from source instead, run the commands under \"Get the latest version\" in the README.",
+                    &theme,
+                ));
+            }
         });
         ui.add_space(14.0);
 

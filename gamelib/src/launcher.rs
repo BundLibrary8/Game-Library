@@ -86,6 +86,20 @@ fn check_uri(uri: &str) -> Result<()> {
 /// The command that asks the operating system to open a URI with whatever
 /// program is registered for it (Steam for `steam://`, Epic for
 /// `com.epicgames.launcher://`).
+/// Open a web page in the default browser. Only `https://` links are
+/// accepted.
+pub fn open_link(url: &str) -> Result<()> {
+    anyhow::ensure!(url.starts_with("https://"), "'{url}' isn't a web link");
+    check_uri(url)?;
+    uri_command(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| format!("couldn't open {url}"))?;
+    Ok(())
+}
+
 fn uri_command(uri: &str) -> Command {
     if cfg!(windows) {
         // rundll32 rather than `cmd /C start`: cmd treats the `&` in Epic's

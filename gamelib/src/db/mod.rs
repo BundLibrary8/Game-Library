@@ -144,6 +144,23 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE games ADD COLUMN review TEXT;
     ALTER TABLE games ADD COLUMN process_name TEXT;
     ",
+    // v8: launch profiles, session journals, playtime goals, screenshot
+    // folders and how much disk space each game takes
+    "
+    CREATE TABLE launch_profiles(
+        id INTEGER PRIMARY KEY,
+        game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        args TEXT NOT NULL DEFAULT '',
+        is_default INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX launch_profiles_game ON launch_profiles(game_id);
+    ALTER TABLE play_sessions ADD COLUMN note TEXT;
+    ALTER TABLE games ADD COLUMN goal_minutes INTEGER;
+    ALTER TABLE games ADD COLUMN screenshots_dir TEXT;
+    ALTER TABLE games ADD COLUMN size_bytes INTEGER;
+    ALTER TABLE games ADD COLUMN size_checked_at INTEGER;
+    ",
 ];
 
 /// A connection to the library database.

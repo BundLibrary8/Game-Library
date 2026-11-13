@@ -1153,6 +1153,7 @@ pub enum Icon {
     Couch,
     Discover,
     Assistant,
+    Health,
 }
 
 pub fn icon(painter: &egui::Painter, icon: Icon, centre: Pos2, colour: Color32) {
@@ -1191,6 +1192,21 @@ pub fn icon(painter: &egui::Painter, icon: Icon, centre: Pos2, colour: Color32) 
             }
         }
         Icon::Shop => star4(painter, centre, 10.0, colour),
+        Icon::Health => {
+            // A heartbeat line.
+            painter.line(
+                vec![
+                    p(-10.0, 1.0),
+                    p(-5.0, 1.0),
+                    p(-2.5, -6.0),
+                    p(1.0, 7.0),
+                    p(4.0, -2.0),
+                    p(6.0, 1.0),
+                    p(10.0, 1.0),
+                ],
+                stroke,
+            );
+        }
         Icon::Discover => {
             // A compass.
             painter.circle_stroke(centre, 9.0, stroke);

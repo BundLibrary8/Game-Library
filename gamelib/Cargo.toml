@@ -1,6 +1,6 @@
 [package]
 name = "gamelib"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
@@ -27,6 +27,8 @@ walkdir = "2.5.0"
 tempfile = "3.27.0"
 
 [target."cfg(windows)".dependencies]
+notify-rust = "4.19.0"
+tray-icon = "0.26.1"
 winreg = "0.56.0"
 
 # Build the libraries GameLib uses with optimisation even in a normal

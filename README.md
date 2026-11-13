@@ -84,7 +84,7 @@ needs an internet connection the first time; if you are offline it tries
 again next start.
 
 The icons down the left are Profile, Home, Library, Discover, Assistant,
-Franchises, Stats, Shop and Settings. The TV icon at the bottom opens
+Franchises, Stats, Shop, Library health and Settings. The TV icon at the bottom opens
 **Couch Mode**.
 
 ### What's where
@@ -112,6 +112,47 @@ Franchises, Stats, Shop and Settings. The TV icon at the bottom opens
   achievements to unlock. **Your Wrapped** looks back at a year.
 - **Settings → Sync between PCs**: pick a folder that OneDrive, Dropbox or
   Google Drive syncs, and your library follows you between PCs.
+
+### More on a game's page
+
+- **Launch profiles**: named sets of launch options, like "Windowed"
+  (`-windowed`). Tick one to make it the default; pick another with **▾**
+  next to Launch. Works for games started from an exe and for Steam games
+  (other launchers don't take options from outside).
+- **Session journal**: every session, with a note you can add ("beat the
+  second boss").
+- **Playtime goal**: "play 20 hours of this". The weekly goal (or limit)
+  for all games is in **Settings → Weekly playtime goal**; both show on
+  Home.
+- **Screenshots**: found in Steam's screenshot folder, the Xbox Game Bar's
+  `Videos\Captures` folder, and a folder you choose. Click one to see it
+  big; arrow keys step through them.
+
+### Search and keyboard shortcuts
+
+Press **Ctrl+K** to search everything: games, screens and actions. **F1**
+lists every shortcut, including **Ctrl+F** (search the library),
+**Ctrl+1…9** (screens), **F5** (scan), **Ctrl+Enter** (play the open game)
+and **Ctrl +/-** (text size).
+
+### Library health
+
+The heartbeat icon checks every game: missing exes or folders, missing
+covers, duplicates. It shows free space on each drive and, after **Measure
+disk space**, how big each game is.
+
+### Other settings
+
+- **Accessibility**: text size and high contrast.
+- **Notifications and tray** (Windows): desktop notifications when a game
+  closes, an achievement unlocks or a goal is reached while GameLib isn't in
+  front; a system tray icon; and optionally keep running in the tray when
+  the window is closed (right-click the icon → Quit to really close).
+- **Export and import**: as well as the full JSON backup, **Export CSV** /
+  **Import CSV** for spreadsheets. An import matches games by title and
+  updates status, rating, hours played, hours to beat, favourite, tags and
+  notes; rows with an `exe` column add games that aren't in the library.
+- **Updates**: shows your version and checks GitHub for a newer release.
 
 ### Admin panel
 
@@ -178,6 +219,27 @@ window.
 | `$env:GAMELIB_DATA_DIR = "C:\temp\gamelib-test"` | Keeps the library somewhere else, for experimenting safely. |
 
 Your library is normally kept in `%APPDATA%\gamelib\`.
+
+## Releases
+
+Releases are built automatically. To make one:
+
+1. Add a section for the new version at the top of `CHANGELOG.md`.
+2. Change `version` in `gamelib/Cargo.toml` to match.
+3. Commit, then tag and push the tag:
+
+```bash
+git tag v0.2.0
+```
+
+```bash
+git push origin v0.2.0
+```
+
+GitHub Actions then builds `gamelib.exe` on Windows, zips it with the
+README and changelog, and publishes a GitHub release with that version's
+notes. **Settings → Updates → Check for updates** looks at those releases.
+Every push and pull request also runs the tests (`.github/workflows/ci.yml`).
 
 ## More
 

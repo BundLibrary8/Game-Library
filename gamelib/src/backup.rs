@@ -41,8 +41,12 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(usize, u64)> {
             std::fs::create_dir_all(&dest)
                 .with_context(|| format!("couldn't create {}", dest.display()))?;
         } else if entry.file_type().is_file() {
-            bytes += std::fs::copy(entry.path(), &dest)
+            std::fs::copy(entry.path(), &dest)
                 .with_context(|| format!("couldn't copy {}", entry.path().display()))?;
+            // Count the size of the copy rather than trusting what `copy`
+            // returns: on Windows that comes from a progress report some
+            // systems don't give.
+            bytes += std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
             files += 1;
         }
     }

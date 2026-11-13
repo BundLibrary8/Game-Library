@@ -1,0 +1,57 @@
+# Makes a release when a version tag is pushed:
+#
+#   git tag v0.2.0
+#   git push origin v0.2.0
+#
+# It builds gamelib.exe on Windows, zips it with the README and changelog,
+# and publishes a GitHub release with the notes for that version from
+# CHANGELOG.md. GameLib's "Check for updates" looks at these releases.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gamelib
+      - name: Check the tag matches Cargo.toml
+        shell: bash
+        run: |
+          version=$(grep -m1 '^version' gamelib/Cargo.toml | cut -d'"' -f2)
+          test "v$version" = "${GITHUB_REF_NAME}" || { echo "Tag ${GITHUB_REF_NAME} but Cargo.toml says $version"; exit 1; }
+      - name: Test
+        working-directory: gamelib
+        run: cargo test --release
+      - name: Build
+        working-directory: gamelib
+        run: cargo build --release
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist/GameLib
+          cp gamelib/target/release/gamelib.exe dist/GameLib/
+          cp README.md CHANGELOG.md dist/GameLib/
+          cd dist && 7z a "gamelib-${GITHUB_REF_NAME}-windows.zip" GameLib
+      - name: Release notes from the changelog
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            /^## / { if (found) exit; if (index($0, "[" v "]")) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md || echo "GameLib ${GITHUB_REF_NAME}" > notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          body_path: notes.md
