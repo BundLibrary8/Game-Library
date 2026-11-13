@@ -15,6 +15,7 @@
 //! - `dialogs.rs`: the pop-up windows.
 //! - `couch.rs`: Couch Mode, the full-screen controller-friendly view.
 
+mod admin;
 mod assistant;
 mod couch;
 mod details;
@@ -29,6 +30,7 @@ mod profile;
 mod settings;
 mod shop;
 mod smart;
+mod splash;
 mod stats;
 mod theme;
 mod wrapped;
@@ -62,6 +64,8 @@ const PREVIEW_SECS: f64 = 10.0;
 const COUCH_KEY: &str = "ui.start_couch";
 /// Setting: "0" to stop the backgrounds moving.
 const ANIMATE_KEY: &str = "ui.animate";
+/// Setting: "0" to skip the loading animation on startup.
+const SPLASH_KEY: &str = "ui.splash";
 
 /// This computer's offset from UTC, in seconds, for showing times locally.
 pub fn local_offset() -> i32 {
@@ -81,6 +85,8 @@ pub enum Screen {
     Assistant,
     /// GameLib Wrapped: a look back at one year.
     Wrapped(i32),
+    /// The password-protected admin panel.
+    Admin,
     Franchises,
     Stats,
     Profile,
@@ -97,6 +103,7 @@ impl Screen {
             "assistant" => Screen::Assistant,
             "franchises" => Screen::Franchises,
             "stats" => Screen::Stats,
+            "admin" => Screen::Admin,
             "wrapped" => Screen::Wrapped(gamelib::patterns::year_of(now(), local_offset())),
             "profile" => Screen::Profile,
             "shop" => Screen::Shop,
@@ -160,6 +167,9 @@ pub struct Data {
     /// When and how you play, over all sessions.
     pub patterns: gamelib::patterns::Patterns,
     pub achievements: Vec<gamelib::achievements::Achievement>,
+    /// A picture chosen in the admin panel to use as the background, and
+    /// its size in pixels.
+    pub custom_background: Option<(PathBuf, [usize; 2])>,
     /// Each game's tags and collections.
     pub all_tags: HashMap<i64, Vec<String>>,
 }
@@ -243,6 +253,10 @@ impl Data {
             sessions,
             patterns,
             achievements,
+            custom_background: db.custom_background()?.and_then(|path| {
+                let (w, h) = image::image_dimensions(&path).ok()?;
+                Some((path, [w as usize, h as usize]))
+            }),
             visible,
             games,
             hidden_count,
@@ -336,6 +350,10 @@ pub struct GameLibApp {
     notes_draft: Option<game_extras::NotesDraft>,
     /// Whether the backgrounds move.
     animate: bool,
+    /// The loading animation, while it plays at startup.
+    splash: Option<splash::Splash>,
+    /// The admin panel's lock and inputs.
+    admin: admin::AdminState,
     /// The clock the backgrounds are drawn at this frame, or `None` when
     /// they are standing still.
     anim_time: Option<f64>,
@@ -433,6 +451,10 @@ impl GameLibApp {
             specs,
             data: Data::load(&db, Filter::All, "", SortBy::LastPlayed)?,
             animate: db.get_bool_setting(ANIMATE_KEY, true)?,
+            admin: admin::AdminState::default(),
+            splash: db
+                .get_bool_setting(SPLASH_KEY, true)?
+                .then(splash::Splash::new),
             anim_time: None,
             couch: None,
             couch_fullscreen_pending: false,
@@ -934,6 +956,20 @@ impl eframe::App for GameLibApp {
             theme.apply(&ctx);
         }
 
+        // The loading animation draws over everything (Couch Mode too)
+        // until it has finished.
+        if let Some(splash) = &mut self.splash
+            && !splash.show(
+                &ctx,
+                &theme,
+                &self.stars,
+                self.data.custom_background.as_ref(),
+                time,
+            )
+        {
+            self.splash = None;
+        }
+
         // Controllers, and Couch Mode, which takes over the whole window.
         let pad_input = self.pad.poll(time);
         if std::mem::take(&mut self.couch_fullscreen_pending) {
@@ -967,6 +1003,25 @@ impl eframe::App for GameLibApp {
         );
         if animating {
             ctx.request_repaint_after(std::time::Duration::from_millis(33));
+        }
+        // A picture from the admin panel replaces the background, dimmed
+        // so the panels on top stay readable.
+        if let Some((path, size)) = &self.data.custom_background
+            && paint::picture_fill(
+                &ctx,
+                ui.painter(),
+                path,
+                *size,
+                ui.max_rect(),
+                Color32::WHITE,
+            )
+        {
+            ui.painter()
+                .rect_filled(ui.max_rect(), 0.0, Color32::from_black_alpha(110));
+        }
+        // Ctrl+Shift+A opens the admin panel.
+        if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::A)) {
+            self.go(Screen::Admin);
         }
 
         let bar = egui::Frame::new()
@@ -1010,6 +1065,7 @@ impl eframe::App for GameLibApp {
                                     Screen::Discover => self.discover_screen(ui),
                                     Screen::Assistant => self.assistant_screen(ui),
                                     Screen::Wrapped(year) => self.wrapped_screen(ui, year),
+                                    Screen::Admin => self.admin_screen(ui),
                                     Screen::Franchises => self.franchises_screen(ui),
                                     Screen::Stats => self.stats_screen(ui),
                                     Screen::Profile => self.profile_screen(ui),

@@ -641,6 +641,47 @@ pub fn file_image_tinted(
     }
 }
 
+/// Paint a picture so it fills `rect` without stretching: the parts that
+/// don't fit are cropped off the edges, like a desktop wallpaper.
+/// `size` is the picture's size in pixels. Returns false until it has
+/// loaded.
+pub fn picture_fill(
+    ctx: &egui::Context,
+    painter: &egui::Painter,
+    path: &std::path::Path,
+    size: [usize; 2],
+    rect: Rect,
+    tint: Color32,
+) -> bool {
+    let image = egui::Image::from_uri(file_uri(path));
+    let texture = match image.load_for_size(ctx, rect.size()) {
+        Ok(egui::load::TexturePoll::Ready { texture }) => texture,
+        Ok(egui::load::TexturePoll::Pending { .. }) => return false,
+        Err(err) => {
+            note_failed_picture(path, &err);
+            return false;
+        }
+    };
+    let picture = size[0].max(1) as f32 / size[1].max(1) as f32;
+    let window = rect.width().max(1.0) / rect.height().max(1.0);
+    let uv = if picture > window {
+        // Wider than the window: crop the sides.
+        let share = window / picture;
+        Rect::from_min_max(
+            egui::pos2((1.0 - share) / 2.0, 0.0),
+            egui::pos2((1.0 + share) / 2.0, 1.0),
+        )
+    } else {
+        let share = picture / window;
+        Rect::from_min_max(
+            egui::pos2(0.0, (1.0 - share) / 2.0),
+            egui::pos2(1.0, (1.0 + share) / 2.0),
+        )
+    };
+    painter.image(texture.id, rect, uv, tint);
+    true
+}
+
 /// Paint a game's cover into `rect`: its cover picture if it has one,
 /// otherwise a gradient with the game's own icon and its title on it.
 /// `title_size` 0 leaves the title off.

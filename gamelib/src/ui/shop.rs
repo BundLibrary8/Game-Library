@@ -202,6 +202,13 @@ impl GameLibApp {
                             "playtime" => "Playtime".to_string(),
                             "finished" => "Finished a game".to_string(),
                             "daily" => "First game of the day".to_string(),
+                            gamelib::admin::ADMIN_REASON => {
+                                if entry.amount >= 0 {
+                                    "Given in the admin panel".to_string()
+                                } else {
+                                    "Taken away in the admin panel".to_string()
+                                }
+                            }
                             "purchase" => {
                                 let name = entry
                                     .item_id
