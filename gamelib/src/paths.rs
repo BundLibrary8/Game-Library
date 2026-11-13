@@ -34,6 +34,16 @@ pub fn covers_dir() -> Result<PathBuf> {
     subdir("covers")
 }
 
+/// Folder for icons read out of games' exes, created if needed.
+pub fn icons_dir() -> Result<PathBuf> {
+    subdir("icons")
+}
+
+/// Folder for save-game backups, created if needed.
+pub fn backups_dir() -> Result<PathBuf> {
+    subdir("backups")
+}
+
 /// Folder for the profile picture and uploaded banners, created if needed.
 pub fn profile_dir() -> Result<PathBuf> {
     subdir("profile")

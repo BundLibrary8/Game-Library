@@ -20,7 +20,8 @@ pub enum Category {
     Owned,
 }
 
-const FEATURED_ID: &str = "bg_constellation";
+/// The background shown on the big card at the top of the shop.
+const FEATURED_ID: &str = "bg_aurora";
 
 fn kind_name(kind: ItemKind) -> &'static str {
     match kind {
@@ -34,7 +35,7 @@ fn kind_name(kind: ItemKind) -> &'static str {
 /// What a click in the shop asked for.
 enum Click {
     Buy(&'static str),
-    Equip(Option<&'static str>),
+    Equip(&'static str),
     UseBanner(&'static str),
     Preview(&'static str),
 }
@@ -54,14 +55,8 @@ impl GameLibApp {
                     .corner_radius(22.0)
                     .inner_margin(egui::Margin::symmetric(20, 10))
                     .show(ui, |ui| {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "✦ {} Stardust",
-                                thousands(self.data.stardust)
-                            ))
-                            .font(bold(18.0))
-                            .color(theme.stardust),
-                        );
+                        let text = format!("{} Stardust", thousands(self.data.stardust));
+                        paint::stardust(ui, &theme, &text, 18.0);
                     });
                 ui.label(paint::muted("Earn Stardust by playing ›", &theme));
             });
@@ -106,16 +101,13 @@ impl GameLibApp {
                     for (what, reward) in [
                         (
                             "Every hour you play",
-                            format!("+ ✦ {}", shop::STARDUST_PER_HOUR),
+                            format!("+{}", shop::STARDUST_PER_HOUR),
                         ),
                         (
                             "Finish a game (1h+ played)",
-                            format!("+ ✦ {}", shop::FINISH_REWARD),
+                            format!("+{}", shop::FINISH_REWARD),
                         ),
-                        (
-                            "First game of the day",
-                            format!("+ ✦ {}", shop::DAILY_REWARD),
-                        ),
+                        ("First game of the day", format!("+{}", shop::DAILY_REWARD)),
                         ("Hit a playtime milestone", "free banner".to_string()),
                     ] {
                         ui.separator();
@@ -124,11 +116,15 @@ impl GameLibApp {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    ui.label(
-                                        egui::RichText::new(reward)
-                                            .font(bold(16.0))
-                                            .color(theme.stardust),
-                                    );
+                                    if reward.starts_with('+') {
+                                        paint::stardust(ui, &theme, &reward, 16.0);
+                                    } else {
+                                        ui.label(
+                                            egui::RichText::new(reward)
+                                                .font(bold(16.0))
+                                                .color(theme.stardust),
+                                        );
+                                    }
                                 },
                             );
                         });
@@ -230,9 +226,9 @@ impl GameLibApp {
                     self.status = format!("Bought {name}.");
                 }
             }
-            Some(Click::Equip(choice)) => {
+            Some(Click::Equip(item_id)) => {
                 self.preview = None;
-                self.check(self.db.equip_library_background(choice));
+                self.check(self.db.equip_library_background(Some(item_id)));
             }
             Some(Click::UseBanner(item_id)) => {
                 let banner = Banner::Item(item_id.to_string());
@@ -245,7 +241,7 @@ impl GameLibApp {
             }
             Some(Click::Preview(item_id)) => {
                 let until = ui.ctx().input(|i| i.time) + PREVIEW_SECS;
-                self.preview = Some((Backdrop::from_item(Some(item_id)), until));
+                self.preview = Some((Backdrop::from_item(item_id), until));
                 self.status = format!("Previewing for {PREVIEW_SECS:.0} seconds…");
             }
             None => {}
@@ -257,14 +253,25 @@ impl GameLibApp {
         let theme = self.theme;
         let item = shop::find_item(FEATURED_ID)?;
         let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+        // The card shows the background itself, moving, in its own colours.
+        let look = Theme::for_backdrop(Backdrop::from_item(item.id));
         let clipped = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-        clipped.rect_filled(rect, 0.0, Color32::from_rgb(0x06, 0x09, 0x14));
-        self.stars.paint(&clipped, rect, None);
-        round_off(ui.painter(), rect, 16.0, theme.bg);
+        paint::backdrop(&clipped, rect, &look, &self.stars, self.anim_time);
+        // A dark fade at the bottom keeps the words readable.
+        let fade = Rect::from_min_max(egui::pos2(rect.left(), rect.bottom() - 170.0), rect.max);
+        paint::gradient(
+            &clipped,
+            fade,
+            0.0,
+            Color32::TRANSPARENT,
+            Color32::from_black_alpha(170),
+            vec2(0.0, 1.0),
+        );
+        round_off(ui.painter(), rect, 16.0, theme.opaque(theme.bg));
         ui.painter().rect_stroke(
             rect,
             16.0,
-            Stroke::new(1.0, Color32::from_rgba_unmultiplied(122, 215, 255, 110)),
+            Stroke::new(1.0, look.accent.gamma_multiply(0.45)),
             egui::StrokeKind::Inside,
         );
 
@@ -275,7 +282,7 @@ impl GameLibApp {
             egui::Align2::LEFT_BOTTOM,
             "F E A T U R E D   ·   L I B R A R Y   B A C K G R O U N D",
             semibold(12.5),
-            Color32::from_rgb(0x7a, 0xd7, 0xff),
+            look.accent,
         );
         painter.text(
             egui::pos2(left, rect.bottom() - 58.0),
@@ -287,7 +294,7 @@ impl GameLibApp {
         painter.text(
             egui::pos2(left, rect.bottom() - 30.0),
             egui::Align2::LEFT_BOTTOM,
-            "A living star map behind your whole library.",
+            featured_blurb(item.id),
             regular(16.0),
             Color32::from_white_alpha(215),
         );
@@ -298,7 +305,6 @@ impl GameLibApp {
             egui::pos2(rect.right() - 230.0, rect.bottom() - 132.0),
             rect.right_bottom() - vec2(26.0, 24.0),
         );
-        let constellation = Theme::constellation();
         // The buttons get their own little area laid over the card, clipped
         // to it so the Buy button's glow doesn't spill outside.
         let mut over_card = ui.new_child(egui::UiBuilder::new().max_rect(buttons));
@@ -308,12 +314,12 @@ impl GameLibApp {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Max), |ui| {
                 ui.spacing_mut().item_spacing.y = 10.0;
                 if owned {
-                    let equipped = self.data.equipped == Some(item.id);
+                    let equipped = self.data.equipped == item.id;
                     let label = if equipped { "✓ Equipped" } else { "Equip" };
-                    if paint::accent_button(ui, &constellation, label, 16.0, vec2(26.0, 13.0))
-                        .clicked()
+                    if paint::accent_button(ui, &look, label, 16.0, vec2(26.0, 13.0)).clicked()
+                        && !equipped
                     {
-                        click = Some(Click::Equip(if equipped { None } else { Some(item.id) }));
+                        click = Some(Click::Equip(item.id));
                     }
                 } else {
                     let price = item.price.unwrap_or(0);
@@ -322,8 +328,8 @@ impl GameLibApp {
                         .add_enabled_ui(can_afford, |ui| {
                             paint::accent_button(
                                 ui,
-                                &constellation,
-                                &format!("Buy · ✦ {price}"),
+                                &look,
+                                &format!("Buy for {price} Stardust"),
                                 16.0,
                                 vec2(26.0, 13.0),
                             )
@@ -331,7 +337,7 @@ impl GameLibApp {
                         .inner;
                     if buy
                         .on_disabled_hover_text(format!(
-                            "You need ✦{} more",
+                            "You need {} more Stardust",
                             price as i64 - self.data.stardust
                         ))
                         .clicked()
@@ -399,17 +405,14 @@ impl GameLibApp {
                     if owned {
                         match item.kind {
                             ItemKind::LibraryBackground => {
-                                let equipped = self.data.equipped == Some(item.id);
+                                let equipped = self.data.equipped == item.id;
                                 let label = if equipped { "✓ Equipped" } else { "Equip" };
                                 if ui
                                     .button(egui::RichText::new(label).color(theme.success))
                                     .clicked()
+                                    && !equipped
                                 {
-                                    click = Some(Click::Equip(if equipped {
-                                        None
-                                    } else {
-                                        Some(item.id)
-                                    }));
+                                    click = Some(Click::Equip(item.id));
                                 }
                             }
                             ItemKind::ProfileBanner => {
@@ -435,14 +438,15 @@ impl GameLibApp {
                         }
                     } else if let Some(price) = item.price {
                         let can_afford = self.data.stardust >= price as i64;
-                        let text = egui::RichText::new(format!("✦ {price}"))
-                            .font(semibold(15.5))
-                            .color(theme.stardust);
-                        if ui
-                            .add_enabled(can_afford, egui::Button::new(text))
+                        let buy = ui
+                            .add_enabled_ui(can_afford, |ui| {
+                                paint::stardust_button(ui, &theme, &price.to_string(), 15.5)
+                            })
+                            .inner;
+                        if buy
                             .on_hover_text("Buy")
                             .on_disabled_hover_text(format!(
-                                "You need ✦{} more",
+                                "You need {} more Stardust",
                                 price as i64 - self.data.stardust
                             ))
                             .clicked()
@@ -469,9 +473,9 @@ impl GameLibApp {
         let (a, b) = paint::item_colours(item.id);
         match item.kind {
             ItemKind::LibraryBackground => {
-                let preview_theme = Theme::for_backdrop(Backdrop::from_item(Some(item.id)));
+                let preview_theme = Theme::for_backdrop(Backdrop::from_item(item.id));
                 let clipped = painter.with_clip_rect(rect.intersect(ui.clip_rect()));
-                paint::backdrop(&clipped, rect, &preview_theme, &self.stars, None);
+                paint::backdrop(&clipped, rect, &preview_theme, &self.stars, self.anim_time);
                 round_off(painter, rect, 10.0, theme.opaque_panel());
             }
             ItemKind::ProfileBanner => paint::gradient(painter, rect, 10.0, a, b, vec2(1.0, 0.6)),
@@ -516,6 +520,16 @@ impl GameLibApp {
                 }
             }
         }
+    }
+}
+
+/// The line under the featured background's name.
+fn featured_blurb(item_id: &str) -> &'static str {
+    match item_id {
+        "bg_aurora" => "Northern lights drifting behind your whole library.",
+        "bg_synthwave_grid" => "A neon sunset and a grid that never stops rolling.",
+        "bg_ember" => "Sparks rising through the dark behind your library.",
+        _ => "A living star map behind your whole library.",
     }
 }
 

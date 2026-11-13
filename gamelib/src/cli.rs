@@ -28,7 +28,7 @@ Library
   tag <game id> <tag>        add a tag
   collection <game id> <name>  add to a collection
   finish <game id>           mark a game finished
-  covers                     download missing covers and store info
+  covers                     find covers, icons and store info
 
 Stats, profile and shop
   stats                      totals and most-played games
@@ -137,7 +137,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 // A play session has no time limit, so wait as long as it takes.
                 match wait(&worker, u64::MAX / 2000)? {
                     WorkerResult::Launched { daily_stardust, .. } if daily_stardust > 0 => {
-                        println!("First game of the day: +✦{daily_stardust}");
+                        println!("First game of the day: +{daily_stardust} Stardust");
                     }
                     WorkerResult::Launched { .. } => {}
                     WorkerResult::SessionStarted { .. } => {
@@ -145,7 +145,7 @@ pub fn run(args: &[String]) -> Result<()> {
                     }
                     WorkerResult::SessionEnded { summary, unlocked } => {
                         println!(
-                            "Played for {}. +✦{}",
+                            "Played for {}. +{} Stardust",
                             format_duration(summary.duration_secs),
                             summary.stardust
                         );
@@ -184,7 +184,7 @@ pub fn run(args: &[String]) -> Result<()> {
         "finish" => {
             let game = db.require_game(game_id(rest)?)?;
             let reward = db.finish_game(game.id, now())?;
-            println!("{} marked as finished. +✦{reward}", game.title);
+            println!("{} marked as finished. +{reward} Stardust", game.title);
             for banner in db.grant_earned_items(now())? {
                 println!("Unlocked: {banner}");
             }
@@ -197,8 +197,11 @@ pub fn run(args: &[String]) -> Result<()> {
                     WorkerResult::CoverReady { game_id, path } => {
                         println!("  cover for game {game_id}: {}", path.display());
                     }
+                    WorkerResult::IconReady { game_id, path } => {
+                        println!("  icon for game {game_id}: {}", path.display());
+                    }
                     WorkerResult::CoversFinished { downloaded, failed } => {
-                        println!("Downloaded {downloaded} covers ({failed} failed).");
+                        println!("Found {downloaded} covers ({failed} failed).");
                         break;
                     }
                     WorkerResult::Error { context, message } => bail!("{context}: {message}"),
@@ -235,7 +238,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 println!("{bio}");
             }
             println!("Badges:   {}", db.badges()?.join(", "));
-            println!("Stardust: ✦{}", db.stardust_balance()?);
+            println!("Stardust: {}", db.stardust_balance()?);
             println!(
                 "Steam:    {}",
                 profile.steam_id.as_deref().unwrap_or("not linked")
@@ -254,11 +257,11 @@ pub fn run(args: &[String]) -> Result<()> {
         }
         "shop" => {
             db.profile(now())?;
-            println!("Stardust: ✦{}\n", db.stardust_balance()?);
+            println!("Stardust: {}\n", db.stardust_balance()?);
             for item in shop::items_for_sale() {
                 let price = match item.price {
                     Some(_) if db.owns_item(item.id)? => "✓ owned".to_string(),
-                    Some(price) => format!("✦{price}"),
+                    Some(price) => format!("{price} Stardust"),
                     None => String::new(),
                 };
                 println!(
@@ -271,7 +274,7 @@ pub fn run(args: &[String]) -> Result<()> {
         }
         "buy" => {
             let balance = db.purchase(one_arg(rest, "an item id")?, now())?;
-            println!("Bought. Stardust left: ✦{balance}");
+            println!("Bought. Stardust left: {balance}");
         }
         "friends" => {
             let worker = start_worker()?;

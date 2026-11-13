@@ -11,7 +11,7 @@ use crate::model::{DetectedGame, Game, LaunchTarget, Source};
 
 const GAME_COLUMNS: &str = "id, title, source, source_id, install_dir, launch_kind, launch_value,
     launch_args, launch_working_dir, favourite, hidden, installed, playtime_secs, last_played,
-    added_at, cover_path, description, genres, release_year";
+    added_at, cover_path, description, genres, release_year, icon_path";
 
 /// How to order a list of games.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -107,6 +107,7 @@ fn game_from_row(row: &rusqlite::Row) -> rusqlite::Result<Game> {
         last_played: row.get(13)?,
         added_at: row.get(14)?,
         cover_path: row.get::<_, Option<String>>(15)?.map(PathBuf::from),
+        icon_path: row.get::<_, Option<String>>(19)?.map(PathBuf::from),
         description: row.get(16)?,
         genres,
         release_year: row.get(18)?,
@@ -347,6 +348,26 @@ impl Db {
             params![game_id, path_to_text(cover)],
         )?;
         Ok(())
+    }
+
+    /// Record the icon read out of a game's exe.
+    pub fn set_icon(&self, game_id: i64, icon: &Path) -> Result<()> {
+        self.conn.execute(
+            "UPDATE games SET icon_path = ?2 WHERE id = ?1",
+            params![game_id, path_to_text(icon)],
+        )?;
+        Ok(())
+    }
+
+    /// Games that have no icon yet.
+    pub fn games_without_icon(&self) -> Result<Vec<Game>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {GAME_COLUMNS} FROM games WHERE icon_path IS NULL ORDER BY id"
+        ))?;
+        let games = stmt
+            .query_map([], game_from_row)?
+            .collect::<Result<_, _>>()?;
+        Ok(games)
     }
 
     /// Save description, genres and release year.
@@ -727,6 +748,37 @@ mod tests {
             db.require_game(id).unwrap().cover_path,
             Some(PathBuf::from("/covers/mine.png"))
         );
+    }
+
+    #[test]
+    fn icons_are_saved_and_listed() {
+        let db = Db::open_in_memory().unwrap();
+        let a = db
+            .upsert_detected(&steam_game("1", "A"), 1)
+            .unwrap()
+            .game_id;
+        let b = db
+            .upsert_detected(&steam_game("2", "B"), 1)
+            .unwrap()
+            .game_id;
+        assert_eq!(db.games_without_icon().unwrap().len(), 2);
+
+        db.set_icon(a, Path::new("/icons/1.png")).unwrap();
+        assert_eq!(
+            db.require_game(a).unwrap().icon_path,
+            Some(PathBuf::from("/icons/1.png"))
+        );
+        let without: Vec<i64> = db
+            .games_without_icon()
+            .unwrap()
+            .iter()
+            .map(|g| g.id)
+            .collect();
+        assert_eq!(without, [b]);
+
+        // A rescan keeps the icon.
+        db.upsert_detected(&steam_game("1", "A"), 9).unwrap();
+        assert!(db.require_game(a).unwrap().icon_path.is_some());
     }
 
     #[test]

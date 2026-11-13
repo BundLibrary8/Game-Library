@@ -8,7 +8,7 @@ use gamelib::shop::{self, ItemKind};
 use gamelib::worker::Job;
 
 use super::theme::{bold, source_name};
-use super::{GameLibApp, TWINKLE_KEY, paint};
+use super::{ANIMATE_KEY, GameLibApp, paint};
 
 impl GameLibApp {
     pub fn settings_screen(&mut self, ui: &mut egui::Ui) {
@@ -128,16 +128,11 @@ impl GameLibApp {
             ui.set_width(ui.available_width());
             ui.label(paint::strong("Appearance", 17.0));
             ui.label(paint::muted(
-                "Library backgrounds come from the Shop.",
+                "Pick a library background. More can be bought in the Shop.",
                 &theme,
             ));
-            let mut choice: Option<Option<&'static str>> = None;
+            let mut choice: Option<&'static str> = None;
             ui.horizontal_wrapped(|ui| {
-                if paint::chip(ui, &theme, "Ember (default)", self.data.equipped.is_none())
-                    .clicked()
-                {
-                    choice = Some(None);
-                }
                 for item in shop::CATALOGUE
                     .iter()
                     .filter(|i| i.kind == ItemKind::LibraryBackground)
@@ -145,29 +140,110 @@ impl GameLibApp {
                     if !self.data.owned.iter().any(|id| id == item.id) {
                         continue;
                     }
-                    if paint::chip(ui, &theme, item.name, self.data.equipped == Some(item.id))
-                        .clicked()
-                    {
-                        choice = Some(Some(item.id));
+                    if paint::chip(ui, &theme, item.name, self.data.equipped == item.id).clicked() {
+                        choice = Some(item.id);
                     }
                 }
             });
             if let Some(choice) = choice {
-                self.check(self.db.equip_library_background(choice));
+                self.check(self.db.equip_library_background(Some(choice)));
             }
-            let mut twinkle = self.twinkle;
+            let mut animate = self.animate;
             if ui
-                .checkbox(
-                    &mut twinkle,
-                    "Twinkling stars on the Constellation background",
-                )
+                .checkbox(&mut animate, "Animated backgrounds")
                 .on_hover_text(
-                    "Uses a little more of the processor, because the window redraws all the time.",
+                    "Turn this off to save a little processor and battery: the backgrounds stand still.",
                 )
                 .changed()
             {
-                self.twinkle = twinkle;
-                self.check(self.db.set_bool_setting(TWINKLE_KEY, twinkle));
+                self.animate = animate;
+                self.check(self.db.set_bool_setting(ANIMATE_KEY, animate));
+            }
+        });
+        ui.add_space(14.0);
+
+        theme.panel_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(paint::strong("Export and import", 17.0));
+            ui.label(paint::muted(
+                "Save your whole library (games, playtime, tags, ratings, franchises) as one file, \
+                 to keep safe or to move to another PC. Importing merges a file into this library.",
+                &theme,
+            ));
+            ui.horizontal(|ui| {
+                if ui.button("Export library…").clicked()
+                    && let Some(file) = rfd::FileDialog::new()
+                        .set_title("Save your library as")
+                        .set_file_name("gamelib-library.json")
+                        .add_filter("GameLib library", &["json"])
+                        .save_file()
+                {
+                    let saved = self.db.export_library(gamelib::now()).and_then(|export| {
+                        gamelib::backup::write_export(&export, &file).map(|()| export.games.len())
+                    });
+                    if let Some(count) = self.check(saved) {
+                        self.status = format!("Exported {count} games to {}.", file.display());
+                    }
+                }
+                if ui.button("Import library…").clicked()
+                    && let Some(file) = rfd::FileDialog::new()
+                        .set_title("Choose a GameLib library file")
+                        .add_filter("GameLib library", &["json"])
+                        .pick_file()
+                {
+                    let imported = gamelib::backup::read_export(&file)
+                        .and_then(|export| self.db.import_library(&export, gamelib::now()));
+                    if let Some(summary) = self.check(imported) {
+                        self.status = format!(
+                            "Imported: {} new games, {} updated.",
+                            summary.added, summary.updated
+                        );
+                    }
+                }
+            });
+        });
+        ui.add_space(14.0);
+
+        theme.panel_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(paint::strong("This PC", 17.0));
+            match self.pc_specs() {
+                Some(specs) => {
+                    egui::Grid::new("pc_specs")
+                        .num_columns(2)
+                        .spacing([18.0, 6.0])
+                        .show(ui, |ui| {
+                            for (label, value) in [
+                                ("System", specs.os.clone()),
+                                (
+                                    "Processor",
+                                    format!("{} ({} threads)", specs.cpu, specs.cores),
+                                ),
+                                ("Memory", format!("{:.0} GB RAM", specs.ram_gb.round())),
+                                (
+                                    "Graphics",
+                                    specs
+                                        .gpu
+                                        .clone()
+                                        .unwrap_or_else(|| "Not detected".to_string()),
+                                ),
+                            ] {
+                                ui.label(paint::muted(label, &theme));
+                                ui.label(value);
+                                ui.end_row();
+                            }
+                        });
+                    ui.label(
+                        paint::muted(
+                            "Used for the \"Can I run it?\" check on each game's page.",
+                            &theme,
+                        )
+                        .size(13.5),
+                    );
+                }
+                None => {
+                    ui.label(paint::muted("Reading this PC's specs…", &theme));
+                }
             }
         });
         ui.add_space(14.0);

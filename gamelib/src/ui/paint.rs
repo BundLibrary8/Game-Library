@@ -156,8 +156,9 @@ impl StarMap {
         }
     }
 
-    /// Paint the sky over `rect`. `time` (seconds) makes the stars twinkle;
-    /// pass `None` for a still sky.
+    /// Paint the Constellation sky over `rect`: nebula glows, constellation
+    /// lines, and stars. `time` (seconds) makes the stars twinkle and sends
+    /// the occasional shooting star across; pass `None` for a still sky.
     pub fn paint(&self, painter: &egui::Painter, rect: Rect, time: Option<f64>) {
         let at = |x: f32, y: f32| {
             pos2(
@@ -167,23 +168,27 @@ impl StarMap {
         };
         let size = rect.width().max(rect.height());
 
-        // Nebula: big, faint glows of purple and teal.
+        // Nebula: big, faint glows of purple and teal that slowly breathe.
+        let breathe = |phase: f32| match time {
+            Some(t) => 1.0 + 0.12 * ((t as f32) * 0.25 + phase).sin(),
+            None => 1.0,
+        };
         glow(
             painter,
             at(0.12, 0.05),
-            size * 0.62,
+            size * 0.62 * breathe(0.0),
             Color32::from_rgba_unmultiplied(98, 64, 200, 105),
         );
         glow(
             painter,
             at(0.95, 0.95),
-            size * 0.55,
+            size * 0.55 * breathe(2.0),
             Color32::from_rgba_unmultiplied(20, 120, 150, 85),
         );
         glow(
             painter,
             at(0.55, 0.45),
-            size * 0.35,
+            size * 0.35 * breathe(4.0),
             Color32::from_rgba_unmultiplied(60, 60, 170, 28),
         );
 
@@ -202,14 +207,87 @@ impl StarMap {
             }
         }
 
+        self.paint_stars(painter, rect, time, 1.0);
+
+        // A shooting star every few seconds, from a different place each time.
+        if let Some(t) = time {
+            const EVERY: f64 = 7.0;
+            const LASTS: f64 = 0.9;
+            let number = (t / EVERY).floor();
+            let progress = ((t - number * EVERY) / LASTS) as f32;
+            if progress < 1.0 {
+                let random = |salt: f64| {
+                    ((number * 12.9898 + salt).sin() * 43758.5453).rem_euclid(1.0) as f32
+                };
+                let start = at(0.1 + 0.7 * random(1.0), 0.04 + 0.3 * random(2.0));
+                let travel = vec2(rect.width() * 0.22, rect.height() * 0.16);
+                let head = start + travel * progress;
+                let fade = (1.0 - progress).min(progress * 6.0).clamp(0.0, 1.0);
+                // The tail is drawn as short pieces that get fainter.
+                for piece in 0..6 {
+                    let from = head - travel * 0.045 * piece as f32;
+                    let to = head - travel * 0.045 * (piece + 1) as f32;
+                    let alpha = (fade * 230.0 * (1.0 - piece as f32 / 6.0)) as u8;
+                    painter.line_segment(
+                        [from, to],
+                        Stroke::new(1.8, Color32::from_rgba_unmultiplied(223, 232, 255, alpha)),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Paint the star positions as sparks rising from the bottom of `rect`:
+    /// each one drifts up, sways a little, flickers, and fades as it climbs.
+    pub fn paint_sparks(&self, painter: &egui::Painter, rect: Rect, time: f32) {
+        // Every other star is enough; a sky full of sparks is too busy.
+        for star in self.stars.iter().step_by(2) {
+            let speed = 0.012 + 0.03 * star.brightness;
+            // How far up it has got: 0.0 at the bottom, 1.0 at the top.
+            let climb = (star.y + time * speed).rem_euclid(1.0);
+            let sway = 0.012 * (time * 0.7 + star.phase).sin();
+            let centre = pos2(
+                rect.left() + (star.x + sway) * rect.width(),
+                rect.bottom() - climb * rect.height(),
+            );
+            let flicker = 0.7 + 0.3 * (time * 3.1 + star.phase * 5.0).sin();
+            let alpha = ((1.0 - climb).powf(1.4) * flicker * 230.0) as u8;
+            if star.size > 1.3 {
+                glow(
+                    painter,
+                    centre,
+                    star.size * 5.0,
+                    Color32::from_rgba_unmultiplied(255, 140, 50, alpha / 3),
+                );
+            }
+            painter.circle_filled(
+                centre,
+                star.size,
+                Color32::from_rgba_unmultiplied(255, 180, 90, alpha),
+            );
+        }
+    }
+
+    /// Paint just the stars. `strength` (0.0 to 1.0) dims them, for
+    /// backgrounds where they are only a detail.
+    pub fn paint_stars(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        time: Option<f64>,
+        strength: f32,
+    ) {
         for star in &self.stars {
             let twinkle = match time {
-                Some(t) => 0.75 + 0.25 * ((t as f32) * 1.3 + star.phase).sin(),
+                Some(t) => 0.72 + 0.28 * ((t as f32) * 1.3 + star.phase).sin(),
                 None => 1.0,
             };
-            let alpha = (star.brightness * twinkle * 255.0) as u8;
+            let alpha = (star.brightness * twinkle * strength * 255.0) as u8;
             painter.circle_filled(
-                at(star.x, star.y),
+                pos2(
+                    rect.left() + star.x * rect.width(),
+                    rect.top() + star.y * rect.height(),
+                ),
                 star.size,
                 Color32::from_rgba_unmultiplied(223, 232, 255, alpha),
             );
@@ -217,7 +295,8 @@ impl StarMap {
     }
 }
 
-/// Paint the window's background for the current theme.
+/// Paint the window's background for the current theme. `time` (seconds)
+/// animates it; `None` draws it standing still.
 pub fn backdrop(
     painter: &egui::Painter,
     rect: Rect,
@@ -227,15 +306,16 @@ pub fn backdrop(
 ) {
     painter.rect_filled(rect, 0.0, theme.bg);
     match theme.backdrop {
-        Backdrop::Plain => {}
+        Backdrop::Ember => embers(painter, rect, stars, time),
         Backdrop::Constellation => stars.paint(painter, rect, time),
-        Backdrop::Aurora => aurora(painter, rect),
-        Backdrop::Synthwave => synthwave(painter, rect),
+        Backdrop::Aurora => aurora(painter, rect, stars, time),
+        Backdrop::Synthwave => synthwave(painter, rect, stars, time),
     }
 }
 
-/// Green and violet bands, like the northern lights.
-fn aurora(painter: &egui::Painter, rect: Rect) {
+/// Warm glows low down, with sparks drifting up out of them.
+fn embers(painter: &egui::Painter, rect: Rect, stars: &StarMap, time: Option<f64>) {
+    let t = time.unwrap_or(0.0) as f32;
     let size = rect.width().max(rect.height());
     let at = |x: f32, y: f32| {
         pos2(
@@ -243,60 +323,221 @@ fn aurora(painter: &egui::Painter, rect: Rect) {
             rect.top() + y * rect.height(),
         )
     };
-    for (x, y, radius, colour) in [
-        (0.15, 0.25, 0.55, (38, 190, 130, 80)),
-        (0.45, 0.10, 0.45, (40, 150, 170, 60)),
-        (0.80, 0.30, 0.55, (120, 80, 220, 80)),
-        (0.60, 0.85, 0.50, (60, 60, 160, 50)),
-    ] {
-        let (r, g, b, a) = colour;
-        glow(
-            painter,
-            at(x, y),
-            size * radius,
-            Color32::from_rgba_unmultiplied(r, g, b, a),
-        );
-    }
-}
-
-/// A pink horizon with a grid running towards it.
-fn synthwave(painter: &egui::Painter, rect: Rect) {
-    let horizon = rect.top() + rect.height() * 0.58;
-    let sky = Rect::from_min_max(rect.min, pos2(rect.right(), horizon));
-    gradient(
+    // The fire's glow breathes slowly.
+    let breathe = 1.0 + 0.08 * (t * 0.5).sin();
+    glow(
         painter,
-        sky,
-        0.0,
-        Color32::from_rgb(20, 6, 38),
-        Color32::from_rgb(150, 30, 110),
-        vec2(0.0, 1.0),
+        at(0.15, 1.05),
+        size * 0.6 * breathe,
+        Color32::from_rgba_unmultiplied(230, 110, 30, 85),
     );
     glow(
         painter,
-        pos2(rect.center().x, horizon),
-        rect.width() * 0.35,
-        Color32::from_rgba_unmultiplied(255, 90, 170, 110),
+        at(0.9, 1.1),
+        size * 0.55 / breathe,
+        Color32::from_rgba_unmultiplied(200, 60, 40, 70),
     );
-    let ground = Rect::from_min_max(pos2(rect.left(), horizon), rect.max);
-    painter.rect_filled(ground, 0.0, Color32::from_rgb(14, 4, 28));
-    let line = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 80, 190, 70));
-    // Lines fanning out from the vanishing point…
-    for i in -12..=12 {
-        let x = rect.center().x + i as f32 * rect.width() * 0.14;
-        painter.line_segment(
-            [
-                pos2(rect.center().x + i as f32 * 14.0, horizon),
-                pos2(x, rect.bottom()),
-            ],
-            line,
+    glow(
+        painter,
+        at(0.55, -0.1),
+        size * 0.45,
+        Color32::from_rgba_unmultiplied(120, 60, 30, 40),
+    );
+    stars.paint_sparks(painter, rect, t);
+}
+
+/// One curtain of the northern lights: a wavy band that is brightest along
+/// its lower edge and fades upwards.
+#[allow(clippy::too_many_arguments)]
+fn aurora_ribbon(
+    painter: &egui::Painter,
+    rect: Rect,
+    centre: f32,
+    sway: f32,
+    height: f32,
+    colour: (u8, u8, u8, u8),
+    waves: f32,
+    phase: f32,
+    time: f32,
+) {
+    const COLUMNS: u32 = 72;
+    let (r, g, b, a) = colour;
+    let mut mesh = Mesh::default();
+    for column in 0..=COLUMNS {
+        let across = column as f32 / COLUMNS as f32;
+        // Two waves of different lengths, drifting in opposite directions.
+        let wave = 0.6 * (across * waves * TAU + time * 0.35 + phase).sin()
+            + 0.4 * (across * waves * 2.3 * TAU - time * 0.22 + phase * 1.7).sin();
+        // The curtain shimmers: columns brighten and dim as it moves.
+        let shimmer = 0.6 + 0.4 * (across * 11.0 + time * 0.8 + phase * 3.0).sin();
+        let x = rect.left() + across * rect.width();
+        let edge = rect.top() + rect.height() * (centre + sway * wave);
+        let alpha = (a as f32 * shimmer) as u8;
+        mesh.colored_vertex(pos2(x, edge - rect.height() * height), Color32::TRANSPARENT);
+        mesh.colored_vertex(
+            pos2(x, edge),
+            Color32::from_rgba_unmultiplied(r, g, b, alpha),
+        );
+        mesh.colored_vertex(
+            pos2(x, edge + rect.height() * height * 0.12),
+            Color32::TRANSPARENT,
         );
     }
-    // …and lines across, closer together near the horizon.
-    for i in 1..=9 {
-        let t = (i as f32 / 9.0).powi(2);
-        let y = horizon + t * ground.height();
-        painter.line_segment([pos2(rect.left(), y), pos2(rect.right(), y)], line);
+    for column in 0..COLUMNS {
+        let i = column * 3;
+        // Upper band (fading up) and lower band (the short fade below).
+        for (top, bottom) in [(0, 1), (1, 2)] {
+            mesh.add_triangle(i + top, i + bottom, i + 3 + top);
+            mesh.add_triangle(i + bottom, i + 3 + bottom, i + 3 + top);
+        }
     }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+/// The northern lights: green, teal and violet curtains over a dark sky
+/// with faint stars.
+fn aurora(painter: &egui::Painter, rect: Rect, stars: &StarMap, time: Option<f64>) {
+    let t = time.unwrap_or(0.0) as f32;
+    let size = rect.width().max(rect.height());
+    let at = |x: f32, y: f32| {
+        pos2(
+            rect.left() + x * rect.width(),
+            rect.top() + y * rect.height(),
+        )
+    };
+    glow(
+        painter,
+        at(0.2, 0.0),
+        size * 0.6,
+        Color32::from_rgba_unmultiplied(20, 110, 100, 60),
+    );
+    glow(
+        painter,
+        at(0.85, 1.0),
+        size * 0.55,
+        Color32::from_rgba_unmultiplied(70, 50, 160, 55),
+    );
+    stars.paint_stars(painter, rect, time, 0.55);
+    aurora_ribbon(
+        painter,
+        rect,
+        0.50,
+        0.07,
+        0.42,
+        (150, 105, 245, 80),
+        0.9,
+        4.0,
+        t,
+    );
+    aurora_ribbon(
+        painter,
+        rect,
+        0.40,
+        0.06,
+        0.36,
+        (60, 185, 225, 85),
+        1.3,
+        2.1,
+        t,
+    );
+    aurora_ribbon(
+        painter,
+        rect,
+        0.32,
+        0.08,
+        0.30,
+        (70, 240, 160, 120),
+        1.1,
+        0.0,
+        t,
+    );
+}
+
+/// A striped sun setting behind a neon grid that rolls towards you.
+fn synthwave(painter: &egui::Painter, rect: Rect, stars: &StarMap, time: Option<f64>) {
+    let t = time.unwrap_or(0.0) as f32;
+    let horizon = rect.top() + rect.height() * 0.58;
+    let sky = Rect::from_min_max(rect.min, pos2(rect.right(), horizon));
+    let ground = Rect::from_min_max(pos2(rect.left(), horizon), rect.max);
+    let sky_top = Color32::from_rgb(16, 4, 34);
+    let sky_low = Color32::from_rgb(120, 26, 104);
+    gradient(painter, sky, 0.0, sky_top, sky_low, vec2(0.0, 1.0));
+    let upper_sky = Rect::from_min_max(
+        rect.min,
+        pos2(rect.right(), rect.top() + rect.height() * 0.4),
+    );
+    stars.paint_stars(
+        &painter.with_clip_rect(upper_sky.intersect(painter.clip_rect())),
+        rect,
+        time,
+        0.6,
+    );
+
+    // The sun: yellow at the top, pink at the bottom, cut off by the
+    // horizon, with dark stripes sliding down across its lower half.
+    let radius = rect.height().min(rect.width()) * 0.19;
+    let sun_centre = pos2(rect.center().x, horizon - radius * 0.42);
+    let sun = Rect::from_center_size(sun_centre, Vec2::splat(radius * 2.0));
+    let above_horizon = painter.with_clip_rect(sky.intersect(painter.clip_rect()));
+    glow(
+        &above_horizon,
+        sun_centre,
+        radius * 2.1,
+        Color32::from_rgba_unmultiplied(255, 90, 170, 95),
+    );
+    gradient(
+        &above_horizon,
+        sun,
+        radius,
+        Color32::from_rgb(255, 222, 92),
+        Color32::from_rgb(255, 60, 150),
+        vec2(0.0, 1.0),
+    );
+    const STRIPES: u32 = 6;
+    let slide = (t * 0.12).rem_euclid(1.0);
+    for stripe in 0..STRIPES {
+        let down = (stripe as f32 + slide) / STRIPES as f32; // 0 at the middle, 1 at the bottom
+        let y = sun_centre.y + down * radius;
+        let thickness = 2.0 + down * radius * 0.11;
+        let band = Rect::from_min_max(pos2(sun.left(), y), pos2(sun.right(), y + thickness));
+        above_horizon.rect_filled(band, 0.0, mix(sky_top, sky_low, 0.75));
+    }
+
+    painter.rect_filled(ground, 0.0, Color32::from_rgb(13, 3, 30));
+    glow(
+        &painter.with_clip_rect(ground.intersect(painter.clip_rect())),
+        pos2(rect.center().x, horizon),
+        rect.width() * 0.5,
+        Color32::from_rgba_unmultiplied(255, 70, 180, 60),
+    );
+    let neon = |alpha: u8| Stroke::new(1.2, Color32::from_rgba_unmultiplied(255, 84, 196, alpha));
+    // Lines fanning out from the vanishing point…
+    for i in -14..=14 {
+        let x = rect.center().x + i as f32 * rect.width() * 0.13;
+        painter.line_segment(
+            [
+                pos2(rect.center().x + i as f32 * 10.0, horizon),
+                pos2(x, rect.bottom()),
+            ],
+            neon(70),
+        );
+    }
+    // …and lines across, which roll towards you: each one starts at the
+    // horizon and speeds up as it gets closer.
+    const ROWS: u32 = 12;
+    let roll = (t * 0.45).rem_euclid(1.0);
+    for row in 0..ROWS {
+        let near = ((row as f32 + roll) / ROWS as f32).powf(2.2);
+        let y = horizon + near * ground.height();
+        painter.line_segment(
+            [pos2(rect.left(), y), pos2(rect.right(), y)],
+            neon((40.0 + 90.0 * near) as u8),
+        );
+    }
+    painter.line_segment(
+        [pos2(rect.left(), horizon), pos2(rect.right(), horizon)],
+        Stroke::new(1.6, Color32::from_rgba_unmultiplied(255, 150, 220, 200)),
+    );
 }
 
 // --- Covers --------------------------------------------------------------
@@ -329,8 +570,9 @@ pub fn file_uri(path: &std::path::Path) -> String {
     format!("file://{}", path.display())
 }
 
-/// Paint a game's cover into `rect`: its image if it has one, otherwise a
-/// gradient with the title on it. `title_size` 0 leaves the title off.
+/// Paint a game's cover into `rect`: its cover picture if it has one,
+/// otherwise a gradient with the game's own icon and its title on it.
+/// `title_size` 0 leaves the title off.
 pub fn cover(ui: &Ui, rect: Rect, game: &Game, radius: f32, title_size: f32) {
     if !ui.is_rect_visible(rect) {
         return;
@@ -345,6 +587,22 @@ pub fn cover(ui: &Ui, rect: Rect, game: &Game, radius: f32, title_size: f32) {
         None => {
             let (top, bottom) = title_colours(&game.title);
             gradient(painter, rect, radius, top, bottom, vec2(0.25, 1.0));
+            // The game's own icon (read from its exe), on a soft plate.
+            if let Some(icon) = game.icon_path.as_deref().filter(|path| path.is_file()) {
+                let side = (rect.width() * 0.4).clamp(24.0, 128.0);
+                let centre = pos2(rect.center().x, rect.top() + rect.height() * 0.4);
+                let plate = Rect::from_center_size(centre, Vec2::splat(side * 1.4));
+                painter.rect_filled(plate, side * 0.3, Color32::from_black_alpha(70));
+                painter.rect_stroke(
+                    plate,
+                    side * 0.3,
+                    Stroke::new(1.0, Color32::from_white_alpha(40)),
+                    egui::StrokeKind::Inside,
+                );
+                egui::Image::from_uri(file_uri(icon))
+                    .corner_radius(side * 0.12)
+                    .paint_at(ui, Rect::from_center_size(centre, Vec2::splat(side)));
+            }
             if title_size > 0.0 {
                 let pad = (rect.width() * 0.06).max(8.0);
                 let galley = painter.layout(
@@ -498,14 +756,7 @@ pub fn avatar(
                 .paint_at(ui, rect);
         }
         None => {
-            let (from, to) = if theme.rail {
-                (theme.accent, theme.accent_end)
-            } else {
-                (
-                    lighten(theme.accent, 0.1),
-                    Color32::from_rgb(0xe0, 0x5a, 0x1a),
-                )
-            };
+            let (from, to) = (theme.accent, theme.accent_end);
             gradient(painter, rect, radius, from, to, vec2(0.6, 1.0));
             let initial = name
                 .chars()
@@ -571,8 +822,8 @@ pub fn accent_button(
             0.0
         };
         let fade = if enabled { 1.0 } else { 0.35 };
-        let radius = if theme.rail { size.y / 2.0 } else { 9.0 };
-        if theme.rail && enabled {
+        let radius = size.y / 2.0;
+        if enabled {
             // A soft glow under the button.
             let [r, g, b, _] = theme.accent.to_array();
             glow(
@@ -652,6 +903,68 @@ pub fn badge_pill(ui: &mut Ui, text: &str, colour: Color32) -> Response {
     response
 }
 
+/// A Stardust amount: the four-pointed star, then the text. The star is
+/// drawn rather than typed, because not every font has that symbol.
+pub fn stardust(ui: &mut Ui, theme: &Theme, text: &str, size: f32) -> Response {
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_string(), bold(size), theme.stardust);
+    let star = size * 0.5;
+    let total = vec2(star * 2.0 + size * 0.35 + galley.size().x, galley.size().y);
+    let (rect, response) = ui.allocate_exact_size(total, Sense::hover());
+    if ui.is_rect_visible(rect) {
+        star4(
+            ui.painter(),
+            pos2(rect.left() + star, rect.center().y),
+            star,
+            theme.stardust,
+        );
+        ui.painter().galley(
+            pos2(rect.left() + star * 2.0 + size * 0.35, rect.top()),
+            galley,
+            theme.stardust,
+        );
+    }
+    response
+}
+
+/// A button showing a Stardust amount (the balance, or a price).
+pub fn stardust_button(ui: &mut Ui, theme: &Theme, text: &str, size: f32) -> Response {
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_string(), bold(size), theme.stardust);
+    let star = size * 0.5;
+    let padding = vec2(13.0, 8.0);
+    let inner = vec2(star * 2.0 + size * 0.35 + galley.size().x, galley.size().y);
+    let (rect, response) = ui.allocate_exact_size(inner + 2.0 * padding, Sense::click());
+    if ui.is_rect_visible(rect) {
+        let enabled = ui.is_enabled();
+        let fade = if enabled { 1.0 } else { 0.4 };
+        let fill = if response.hovered() && enabled {
+            lighten(theme.panel_alt, 0.08)
+        } else {
+            theme.panel_alt
+        };
+        let painter = ui.painter();
+        painter.rect_filled(rect, 9.0, fill);
+        painter.rect_stroke(
+            rect,
+            9.0,
+            Stroke::new(1.0, theme.border),
+            egui::StrokeKind::Inside,
+        );
+        let colour = theme.stardust.gamma_multiply(fade);
+        let left = rect.left() + padding.x;
+        star4(painter, pos2(left + star, rect.center().y), star, colour);
+        painter.galley(
+            pos2(left + star * 2.0 + size * 0.35, rect.top() + padding.y),
+            galley,
+            colour,
+        );
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 /// Small, spaced-out capitals: "TOTAL PLAYTIME", "COLLECTIONS".
 pub fn caps(text: &str, size: f32, colour: Color32) -> egui::RichText {
     egui::RichText::new(text.to_uppercase())
@@ -720,12 +1033,13 @@ pub fn bar(ui: &mut Ui, theme: &Theme, fraction: f32, colour: Color32, width: f3
 
 // --- Icons ---------------------------------------------------------------
 
-/// The icons on the Constellation icon rail. They are drawn from simple
+/// The icons on the icon rail. They are drawn from simple
 /// shapes rather than taken from a font, so they look the same everywhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
     Home,
     Library,
+    Franchises,
     Stats,
     Shop,
     Settings,
@@ -748,6 +1062,16 @@ pub fn icon(painter: &egui::Painter, icon: Icon, centre: Pos2, colour: Color32) 
                     let at = p(-7.0 + column as f32 * 7.0, -7.0 + row as f32 * 7.0);
                     painter.rect_filled(Rect::from_center_size(at, Vec2::splat(4.6)), 1.0, colour);
                 }
+            }
+        }
+        Icon::Franchises => {
+            // Three cards fanned out, like a series on a shelf.
+            for (i, x) in [-7.0_f32, 0.0, 7.0].into_iter().enumerate() {
+                let rect = Rect::from_center_size(
+                    p(x, 0.0),
+                    vec2(5.0, 15.0 - (i as f32 - 1.0).abs() * 3.0),
+                );
+                painter.rect_filled(rect, 1.2, colour);
             }
         }
         Icon::Stats => {

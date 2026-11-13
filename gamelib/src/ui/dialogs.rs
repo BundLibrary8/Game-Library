@@ -60,6 +60,12 @@ pub enum Dialog {
         title: String,
     },
     Import(Vec<ImportRow>),
+    /// Which franchise a game belongs to, and where in the order.
+    Franchise {
+        game_id: i64,
+        name: String,
+        order: String,
+    },
     Rename {
         game_id: i64,
         title: String,
@@ -258,6 +264,31 @@ impl GameLibApp {
                         outcome = Outcome::Confirm;
                     }
                 }
+                Dialog::Franchise { name, order, .. } => {
+                    ui.set_width(420.0);
+                    ui.label(egui::RichText::new("Franchise").font(bold(22.0)));
+                    ui.label(paint::muted(
+                        "The series this game belongs to. Leave the name empty to take it out of its franchise.",
+                        &theme,
+                    ));
+                    ui.add(
+                        egui::TextEdit::singleline(name)
+                            .hint_text("Series name")
+                            .desired_width(f32::INFINITY)
+                            .margin(egui::Margin::symmetric(12, 9)),
+                    );
+                    ui.horizontal(|ui| {
+                        ui.label("Place in the playing order");
+                        ui.add(
+                            egui::TextEdit::singleline(order)
+                                .hint_text("1")
+                                .desired_width(60.0)
+                                .margin(egui::Margin::symmetric(12, 9)),
+                        );
+                    });
+                    let order_ok = order.trim().is_empty() || order.trim().parse::<i64>().is_ok();
+                    outcome = dialog_buttons(ui, &theme, "Save", order_ok);
+                }
                 Dialog::NewCollection { name } => {
                     outcome = text_prompt(
                         ui,
@@ -327,6 +358,14 @@ impl GameLibApp {
                     .ensure_tag(&name, as_collection)
                     .and_then(|tag| self.db.tag_game(game_id, tag.id));
                 self.check(result);
+            }
+            Dialog::Franchise {
+                game_id,
+                name,
+                order,
+            } => {
+                let order = order.trim().parse::<i64>().ok();
+                self.check(self.db.set_franchise(game_id, Some(&name), order));
             }
             Dialog::NewCollection { name } => {
                 if let Some(tag) = self.check(self.db.ensure_tag(&name, true)) {

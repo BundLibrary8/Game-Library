@@ -141,46 +141,33 @@ pub fn find_cover_url(
     Ok(urls.into_iter().next())
 }
 
-/// The file extension to save a cover with, taken from its URL.
-/// Anything unexpected becomes `jpg`.
-pub fn cover_extension(url: &str) -> &'static str {
-    let path = url.split(['?', '#']).next().unwrap_or(url).to_lowercase();
-    if path.ends_with(".png") {
-        "png"
-    } else if path.ends_with(".webp") {
-        "webp"
-    } else {
-        "jpg"
+/// Download a file into memory, refusing anything suspiciously large.
+pub fn download_bytes(client: &Client, url: &str) -> Result<Vec<u8>> {
+    let bytes = client
+        .get(url)
+        .send()
+        .with_context(|| format!("couldn't reach {url}"))?
+        .error_for_status()?
+        .bytes()?;
+    if bytes.is_empty() || bytes.len() > MAX_COVER_BYTES {
+        bail!(
+            "the download was an unexpected size ({} bytes)",
+            bytes.len()
+        );
     }
+    Ok(bytes.to_vec())
 }
 
-/// Where a game's cover is saved: `covers/<game id>.<ext>`.
-pub fn cover_path(covers_dir: &Path, game_id: i64, url: &str) -> PathBuf {
-    covers_dir.join(format!("{game_id}.{}", cover_extension(url)))
-}
-
-/// Download a cover into the covers folder and return where it was saved.
+/// Download a picture and save it as a game's cover (resized to the
+/// standard cover size). Returns where it was saved.
 pub fn download_cover(
     client: &Client,
     url: &str,
     covers_dir: &Path,
     game_id: i64,
 ) -> Result<PathBuf> {
-    let bytes = client
-        .get(url)
-        .send()
-        .context("couldn't download the cover")?
-        .error_for_status()?
-        .bytes()?;
-    if bytes.is_empty() || bytes.len() > MAX_COVER_BYTES {
-        bail!(
-            "the cover download was an unexpected size ({} bytes)",
-            bytes.len()
-        );
-    }
-    let dest = cover_path(covers_dir, game_id, url);
-    std::fs::write(&dest, &bytes).with_context(|| format!("couldn't save {}", dest.display()))?;
-    Ok(dest)
+    let picture = download_bytes(client, url)?;
+    crate::artwork::save_cover(&picture, covers_dir, game_id)
 }
 
 // --- Steam Store ---------------------------------------------------------
@@ -191,6 +178,11 @@ pub struct StoreInfo {
     pub description: Option<String>,
     pub genres: Vec<String>,
     pub release_year: Option<u16>,
+    /// The game's wide store banner: a fallback when it has no cover.
+    pub header_image: Option<String>,
+    /// Minimum and recommended PC requirements, as plain text.
+    pub requirements_min: Option<String>,
+    pub requirements_rec: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -205,6 +197,11 @@ struct AppDetails {
     #[serde(default)]
     genres: Vec<Genre>,
     release_date: Option<ReleaseDate>,
+    header_image: Option<String>,
+    /// An object with "minimum" and "recommended" HTML, or an empty list
+    /// when the store has none, so it is read loosely.
+    #[serde(default)]
+    pc_requirements: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -226,6 +223,19 @@ pub fn parse_year(date: &str) -> Option<u16> {
         .find(|year| (1970..=2100).contains(year))
 }
 
+/// One part ("minimum" or "recommended") of the store's requirements, as
+/// plain text without its "Minimum:" heading.
+fn requirements_text(requirements: &serde_json::Value, part: &str) -> Option<String> {
+    let html = requirements.get(part)?.as_str()?;
+    let text = crate::hardware::html_to_text(html);
+    let text = text
+        .lines()
+        .filter(|line| !matches!(line.to_lowercase().as_str(), "minimum:" | "recommended:"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.is_empty()).then_some(text)
+}
+
 /// Parse a Steam Store `appdetails` response. Returns `None` when the
 /// store has no page for the app (delisted games, tools).
 pub fn parse_store_details(json: &str, app_id: &str) -> Result<Option<StoreInfo>> {
@@ -244,6 +254,10 @@ pub fn parse_store_details(json: &str, app_id: &str) -> Result<Option<StoreInfo>
             .filter(|d| !d.is_empty()),
         genres: data.genres.into_iter().map(|g| g.description).collect(),
         release_year: data.release_date.and_then(|d| parse_year(&d.date)),
+        // Only a proper web address is kept; it will be downloaded later.
+        header_image: data.header_image.filter(|url| url.starts_with("https://")),
+        requirements_min: requirements_text(&data.pc_requirements, "minimum"),
+        requirements_rec: requirements_text(&data.pc_requirements, "recommended"),
     }))
 }
 
@@ -312,23 +326,19 @@ mod tests {
     }
 
     #[test]
-    fn cover_file_names() {
-        assert_eq!(cover_extension("https://x/grid/a.png"), "png");
-        assert_eq!(cover_extension("https://x/grid/a.JPG?v=2"), "jpg");
-        assert_eq!(cover_extension("https://x/grid/a.webp#frag"), "webp");
-        assert_eq!(cover_extension("https://x/grid/a.exe"), "jpg");
-        assert_eq!(
-            cover_path(Path::new("/covers"), 7, "https://x/a.png"),
-            PathBuf::from("/covers/7.png")
-        );
-    }
-
-    #[test]
     fn parses_steam_store_details() {
         let info = parse_store_details(APPDETAILS, "570").unwrap().unwrap();
         assert!(info.description.unwrap().starts_with("Every day, millions"));
         assert_eq!(info.genres, ["Action", "Strategy", "Free To Play"]);
         assert_eq!(info.release_year, Some(2013));
+        assert_eq!(
+            info.header_image.as_deref(),
+            Some("https://cdn.akamai.steamstatic.com/steam/apps/570/header.jpg")
+        );
+        let minimum = info.requirements_min.unwrap();
+        assert!(minimum.contains("Memory: 4 GB RAM"), "{minimum}");
+        assert!(!minimum.contains("Minimum"), "the heading is dropped");
+        assert_eq!(info.requirements_rec, None);
     }
 
     #[test]
@@ -338,6 +348,10 @@ mod tests {
             None
         );
         assert_eq!(parse_store_details(APPDETAILS, "999").unwrap(), None);
+        // A game with no requirements sends an empty list instead.
+        let bare = r#"{"5":{"success":true,"data":{"pc_requirements":[]}}}"#;
+        let info = parse_store_details(bare, "5").unwrap().unwrap();
+        assert_eq!(info.requirements_min, None);
         assert!(parse_store_details("[]", "570").is_err());
     }
 

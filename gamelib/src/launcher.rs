@@ -184,6 +184,7 @@ mod tests {
             last_played: None,
             added_at: 0,
             cover_path: None,
+            icon_path: None,
             description: None,
             genres: vec![],
             release_year: None,

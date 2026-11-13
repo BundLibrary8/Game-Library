@@ -5,13 +5,22 @@ and hand-added games, with launching, playtime tracking, cover art, stats,
 a local profile, Steam friends, and the Stardust shop.
 
 The window (`src/ui/`) follows the designs in
-[`../plan/gamelib plan/`](../plan/gamelib%20plan/00%20Home.md) and has two
-looks that share the same screens:
+[`../plan/gamelib plan/`](../plan/gamelib%20plan/00%20Home.md). Every look
+shares one format: an animated background behind glass panels, an icon
+rail down the left, and a two-colour accent. The look follows the library
+background you pick in Settings or the Shop:
 
-- **Ember** (the default): dark panels, amber accent, top bar and sidebar.
-- **Constellation**: a star map behind glass panels, an icon rail, and an
-  ice-blue to violet accent. It switches on while the Constellation library
-  background from the Shop is equipped.
+- **Constellation** (the default, free): twinkling star map with shooting stars.
+- **Ember** (free): sparks drifting up through warm darkness.
+- **Aurora** (Shop): drifting northern lights.
+- **Synthwave** (Shop): a striped sunset over a rolling neon grid.
+
+The animation can be turned off in Settings.
+
+**Game artwork** is found automatically, with no key needed: Steam covers
+are copied from Steam's own library cache (or Steam's public image
+server), and every game's icon is read out of its exe. A SteamGridDB key
+in Settings adds covers for non-Steam games.
 
 The same program also has command-line commands (`src/cli.rs`).
 
@@ -28,14 +37,14 @@ The first build takes several minutes; later ones are quick.
 
 In the window: **Scan** finds launcher games, **+ Add game** adds one by
 hand. Click a game to open its page; hover a cover and press the play
-button to start it straight from the grid. Home, Library, Stats, Shop,
-Profile and Settings are in the top bar and sidebar (or the icon rail).
+button to start it straight from the grid. The icons down the left are
+Profile, Home, Library, Stats, Shop and Settings.
 
 To see a look without owning it, set the `GAMELIB_THEME` environment
-variable to `constellation`, `aurora`, `synthwave` or `ember`:
+variable to `constellation`, `ember`, `aurora` or `synthwave`:
 
 ```powershell
-$env:GAMELIB_THEME = "constellation"; cargo run
+$env:GAMELIB_THEME = "aurora"; cargo run
 ```
 
 Data is kept in `%APPDATA%\gamelib\` (`library.db`, `covers\`,
@@ -60,6 +69,7 @@ cargo fmt
 | `sources/` | The `GameSource` trait and one file each for Steam, Epic, GOG and folder scan |
 | `launcher.rs` | Starts a game (an exe, or a `steam://` / Epic link) |
 | `playtime.rs` | Decides when a game is running; the pure `step` function plus the tracking loop |
+| `artwork.rs` | Covers from Steam's cache and icons read out of exes, no key needed |
 | `metadata.rs` | Covers from SteamGridDB, info from the Steam Store |
 | `stats.rs` | Totals, most played, playtime per day |
 | `profile.rs` | Name, bio, banner, badges, showcase, earned banners |
@@ -97,6 +107,7 @@ Windows and need the manual checklist on a real PC:
 - Epic detection against real `.item` files (tested with sample files)
 - GOG registry reading (compiles for Windows; never run)
 - Opening `steam://` and Epic links
+- Copying covers from a real Steam library cache, and Steam's public image server
 - The window itself, and its file-picker dialogs (the window was run on Linux only)
 - SteamGridDB, Steam Store and Steam Web API calls (the parsers are tested
   against sample responses; the live endpoints were never called)

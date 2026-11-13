@@ -149,14 +149,14 @@ pub fn import_image(source: &Path, profile_dir: &Path, name: &str) -> Result<Pat
 
 impl Db {
     /// The profile. The first call creates it, named "Player", and hands
-    /// out the Founder badge.
+    /// out the free items (the Founder badge and the starting backgrounds).
     pub fn profile(&self, now: i64) -> Result<Profile> {
         let created = self.conn.execute(
             "INSERT OR IGNORE INTO profile(id, display_name, created_at) VALUES (1, ?1, ?2)",
             params![DEFAULT_NAME, now],
         )?;
         if created > 0 {
-            self.grant_item(shop::FOUNDER_BADGE_ID, Acquired::Gift, now)?;
+            self.grant_free_items(now)?;
         }
 
         let profile = self.conn.query_row(
