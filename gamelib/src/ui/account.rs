@@ -44,6 +44,8 @@ pub struct CloudState {
     pub login_shown_at: Option<f64>,
     /// The email box has been given the keyboard once.
     pub login_focused: bool,
+    /// The log-in / sign-up form was sent and hasn't been answered yet.
+    pub submitted: bool,
     pub display_name: String,
     pub bio: String,
 }
@@ -63,14 +65,9 @@ impl GameLibApp {
             .map(|p| !p.anon_key.is_empty())
             .unwrap_or(false);
         let logged_in = self.db.cloud_session().ok().flatten().is_some();
-        // Open on the log-in screen, unless it has been turned off.
-        let skip = self
-            .db
-            .get_setting(super::login::SKIP_KEY)
-            .ok()
-            .flatten()
-            .is_some_and(|v| v == "1");
-        self.cloud.login_screen = ready && !skip;
+        // GameLib always opens on the log-in screen. If you're remembered,
+        // it offers "Continue as …" instead of the form.
+        self.cloud.login_screen = ready;
         if ready && logged_in {
             self.cloud_job(CloudJob::Check, "Checking your GameLib account…");
         } else {
@@ -92,7 +89,9 @@ impl GameLibApp {
                 let was_logged_in = self.cloud.account.is_some();
                 self.cloud.account = account;
                 self.cloud.password.clear();
-                if logged_in {
+                // Logging in or signing up on the log-in screen goes on into
+                // the app. (A remembered login waits for "Continue as …".)
+                if logged_in && std::mem::take(&mut self.cloud.submitted) {
                     self.cloud.login_screen = false;
                 }
                 if logged_in && first {
@@ -112,6 +111,7 @@ impl GameLibApp {
                 }
             }
             CloudResult::ConfirmEmail => {
+                self.cloud.submitted = false;
                 self.cloud.message = Some(
                     "Account made! Supabase has emailed you a link: open it, then log in here."
                         .into(),
@@ -129,6 +129,7 @@ impl GameLibApp {
             }
             CloudResult::Done(message) => self.status = message,
             CloudResult::Failed(message) => {
+                self.cloud.submitted = false;
                 self.cloud.checked = true;
                 self.cloud.message = Some(message.clone());
                 self.error = Some(message);
@@ -293,21 +294,21 @@ impl GameLibApp {
                 .and_then(|()| gamelib::cloud::check_password(&password.0)),
             FormMode::LogIn => Ok(()),
         });
-        match check {
-            Err(err) => self.cloud.message = Some(format!("{err}")),
-            Ok(()) => match self.cloud.mode {
-                FormMode::SignUp => self.cloud_job(
-                    CloudJob::SignUp {
-                        username: self.cloud.username.trim().to_string(),
-                        email,
-                        password,
-                    },
-                    "Creating your account…",
-                ),
-                FormMode::LogIn => {
-                    self.cloud_job(CloudJob::LogIn { email, password }, "Logging in…")
-                }
-            },
+        if let Err(err) = check {
+            self.cloud.message = Some(format!("{err}"));
+            return;
+        }
+        self.cloud.submitted = true;
+        match self.cloud.mode {
+            FormMode::SignUp => self.cloud_job(
+                CloudJob::SignUp {
+                    username: self.cloud.username.trim().to_string(),
+                    email,
+                    password,
+                },
+                "Creating your account…",
+            ),
+            FormMode::LogIn => self.cloud_job(CloudJob::LogIn { email, password }, "Logging in…"),
         }
     }
 
