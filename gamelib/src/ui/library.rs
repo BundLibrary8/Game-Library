@@ -92,7 +92,7 @@ impl GameLibApp {
                 }
             }
             // Everything else you can filter by, and making a collection.
-            ui.menu_button("More ▾", |ui| {
+            ui.menu_button("More…", |ui| {
                 ui.set_min_width(210.0);
                 let visible = &self.data.visible;
                 let mut row = |ui: &mut egui::Ui, filter: Filter, label: String| {
