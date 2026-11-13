@@ -5,15 +5,13 @@
 use std::f32::consts::TAU;
 
 use eframe::egui::{self, Color32, Rect, Sense, Stroke, pos2, vec2};
+use gamelib::cloud::Profile;
 use gamelib::model::Game;
 
 use super::account::FormMode;
 use super::paint;
 use super::theme::{bold, regular, semibold};
 use super::{GameLibApp, notify};
-
-/// The setting that stops GameLib opening on this screen.
-pub const SKIP_KEY: &str = "ui.skip_login";
 
 /// What GameLib does, beside the card on a wide window.
 const FEATURES: [(&str, &str); 3] = [
@@ -259,6 +257,11 @@ impl GameLibApp {
             return;
         }
 
+        if let Some((profile, email)) = self.cloud.account.clone() {
+            self.remembered_card(ui, &profile, &email);
+            return;
+        }
+
         let signing_up = self.cloud.mode == FormMode::SignUp;
         ui.label(
             egui::RichText::new(if signing_up {
@@ -466,24 +469,144 @@ impl GameLibApp {
             if skip.clicked() {
                 self.cloud.login_screen = false;
             }
-            let mut never = self
-                .db
-                .get_setting(SKIP_KEY)
-                .ok()
-                .flatten()
-                .is_some_and(|v| v == "1");
-            if ui
-                .checkbox(
-                    &mut never,
-                    paint::muted("Don't open on this screen", &theme).size(12.5),
-                )
-                .changed()
-            {
-                self.check(self.db.set_setting(SKIP_KEY, if never { "1" } else { "0" }));
-            }
         });
         ui.add_space(4.0);
         ui.vertical_centered(|ui| {
+            ui.label(
+                paint::muted(
+                    "Your library is shared only with friends you accept.",
+                    &theme,
+                )
+                .size(12.0),
+            );
+        });
+    }
+}
+
+impl GameLibApp {
+    /// "Continue as …" for the account GameLib remembers.
+    fn remembered_card(&mut self, ui: &mut egui::Ui, profile: &Profile, email: &str) {
+        let theme = self.theme;
+        let name = if profile.display_name.trim().is_empty() {
+            profile.username.clone()
+        } else {
+            profile.display_name.clone()
+        };
+        ui.label(
+            egui::RichText::new("Welcome back")
+                .font(bold(26.0))
+                .color(theme.text),
+        );
+        ui.label(paint::muted("You're still logged in.", &theme));
+        ui.add_space(20.0);
+
+        // The account: a round initial, the name, username and email.
+        egui::Frame::new()
+            .fill(theme.field_fill())
+            .corner_radius(16.0)
+            .inner_margin(14.0)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(vec2(52.0, 52.0), Sense::hover());
+                    paint::gradient(
+                        ui.painter(),
+                        rect,
+                        26.0,
+                        theme.accent,
+                        theme.accent_end,
+                        vec2(1.0, 1.0),
+                    );
+                    let initial = name
+                        .chars()
+                        .next()
+                        .unwrap_or('?')
+                        .to_uppercase()
+                        .to_string();
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        initial,
+                        bold(24.0),
+                        theme.on_accent,
+                    );
+                    ui.add_space(6.0);
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(&name)
+                                    .font(semibold(17.0))
+                                    .color(theme.text),
+                            )
+                            .truncate(),
+                        );
+                        ui.add(
+                            egui::Label::new(paint::muted(
+                                format!("@{}", profile.username),
+                                &theme,
+                            ))
+                            .truncate(),
+                        );
+                        ui.add(egui::Label::new(paint::muted(email, &theme).size(12.5)).truncate());
+                    });
+                });
+            });
+        ui.add_space(18.0);
+
+        let width = ui.available_width();
+        let (rect, response) = ui.allocate_exact_size(vec2(width, 48.0), Sense::click());
+        let lift = if response.hovered() { 0.12 } else { 0.0 };
+        let [r, g, b, _] = theme.accent.to_array();
+        paint::glow(
+            ui.painter(),
+            rect.center() + vec2(0.0, 8.0),
+            width * 0.55,
+            Color32::from_rgba_unmultiplied(r, g, b, 45),
+        );
+        paint::gradient(
+            ui.painter(),
+            rect,
+            24.0,
+            super::theme::lighten(theme.accent, lift),
+            super::theme::lighten(theme.accent_end, lift),
+            vec2(1.0, 0.0),
+        );
+        let first_name = name.split_whitespace().next().unwrap_or(&name).to_string();
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            format!("Continue as {first_name}"),
+            bold(16.0),
+            theme.on_accent,
+        );
+        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+            || enter
+        {
+            self.cloud.login_screen = false;
+        }
+
+        ui.add_space(16.0);
+        ui.vertical_centered(|ui| {
+            let other = ui
+                .add_enabled(
+                    !self.cloud.busy,
+                    egui::Label::new(
+                        egui::RichText::new("Log in with a different account")
+                            .font(semibold(14.0))
+                            .color(theme.accent),
+                    )
+                    .sense(Sense::click()),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            if other.clicked() {
+                self.cloud.mode = FormMode::LogIn;
+                self.cloud_job(gamelib::worker::CloudJob::LogOut, "Logging out…");
+            }
+            ui.add_space(6.0);
             ui.label(
                 paint::muted(
                     "Your library is shared only with friends you accept.",

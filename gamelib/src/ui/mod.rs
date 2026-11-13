@@ -1398,8 +1398,9 @@ impl GameLibApp {
 
         self.window_events(&ctx, time);
 
-        // GameLib opens on the log-in screen until you log in or skip it.
-        if self.cloud.login_screen && self.cloud.account.is_none() {
+        // GameLib opens on the log-in screen until you log in, continue as
+        // the account it remembers, or skip it.
+        if self.cloud.login_screen {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ui, |ui| self.login_screen(ui, time));

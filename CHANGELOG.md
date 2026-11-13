@@ -8,8 +8,9 @@ before tagging a release.
 
 - GameLib opens on a log-in screen: your own covers drift behind a glass
   card for logging in or creating an account, beside the logo and what
-  GameLib does. A saved login goes straight to the library. You can also
-  continue without an account, or turn the screen off.
+  GameLib does. It always opens there: a remembered login shows
+  "Continue as …" with your name, or log in with a different account, or
+  continue without one.
 - GameLib accounts (Supabase): create an account, log in (remembered
   between runs), add friends by username, accept requests, and see
   friends' libraries and stats. Your library and stats are shared with
