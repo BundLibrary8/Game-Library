@@ -121,6 +121,27 @@ impl Pad {
         }
     }
 
+    /// The controllers connected now: name, and battery if known.
+    pub fn list(&self) -> Vec<(String, Option<String>)> {
+        let Some(gilrs) = &self.gilrs else {
+            return Vec::new();
+        };
+        gilrs
+            .gamepads()
+            .filter(|(_, pad)| pad.is_connected())
+            .map(|(_, pad)| {
+                let power = match pad.power_info() {
+                    gilrs::PowerInfo::Wired => Some("Wired".to_string()),
+                    gilrs::PowerInfo::Discharging(level) => Some(format!("Battery {level}%")),
+                    gilrs::PowerInfo::Charging(level) => Some(format!("Charging, {level}%")),
+                    gilrs::PowerInfo::Charged => Some("Fully charged".to_string()),
+                    gilrs::PowerInfo::Unknown => None,
+                };
+                (pad.name().to_string(), power)
+            })
+            .collect()
+    }
+
     /// Is any controller plugged in?
     pub fn connected(&self) -> bool {
         self.gilrs

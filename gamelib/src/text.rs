@@ -62,6 +62,8 @@ pub fn format_ago(then: i64, now: i64) -> String {
         format!("{} min ago", secs / 60)
     } else if secs < 86_400 {
         format!("{}h ago", secs / 3600)
+    } else if secs < 2 * 86_400 {
+        "1 day ago".to_string()
     } else {
         format!("{} days ago", secs / 86_400)
     }

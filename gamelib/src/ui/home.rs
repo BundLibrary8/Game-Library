@@ -27,6 +27,8 @@ impl GameLibApp {
             return;
         }
 
+        self.goals_strip(ui);
+
         // Continue playing: the three most recently played games.
         let mut recent: Vec<&Game> = self
             .data
@@ -177,5 +179,72 @@ impl GameLibApp {
             Some(CardClick::Play(id)) => self.play(id),
             None => {}
         }
+    }
+
+    /// The weekly goal and game goals, if any are set.
+    fn goals_strip(&mut self, ui: &mut egui::Ui) {
+        let theme = self.theme;
+        let weekly = self
+            .db
+            .weekly_progress(now(), super::local_offset())
+            .ok()
+            .flatten();
+        let games = self.db.game_goals().unwrap_or_default();
+        if weekly.is_none() && games.is_empty() {
+            return;
+        }
+        paint::panel(ui, theme.panel_frame(), |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(paint::strong("Goals", 17.0));
+            ui.add_space(4.0);
+            let width = (ui.available_width() - 330.0).clamp(120.0, 420.0);
+            if let Some((goal, progress)) = weekly {
+                ui.horizontal(|ui| {
+                    ui.add_sized(
+                        vec2(180.0, 20.0),
+                        egui::Label::new(if goal.is_limit {
+                            "Weekly limit"
+                        } else {
+                            "This week"
+                        }),
+                    );
+                    let colour = match (goal.is_limit, progress.reached()) {
+                        (true, true) => theme.danger,
+                        (false, true) => theme.success,
+                        _ => theme.accent,
+                    };
+                    paint::bar(ui, &theme, progress.fraction(), colour, width);
+                    ui.label(paint::muted(
+                        format!(
+                            "{:.1} / {} h",
+                            progress.done_minutes as f32 / 60.0,
+                            goal.minutes / 60
+                        ),
+                        &theme,
+                    ));
+                });
+            }
+            for (id, progress) in games.into_iter().take(4) {
+                let title = self.title_of(id);
+                ui.horizontal(|ui| {
+                    ui.add_sized(vec2(180.0, 20.0), egui::Label::new(title).truncate());
+                    let colour = if progress.reached() {
+                        theme.success
+                    } else {
+                        theme.accent_end
+                    };
+                    paint::bar(ui, &theme, progress.fraction(), colour, width);
+                    ui.label(paint::muted(
+                        format!(
+                            "{} / {} h",
+                            progress.done_minutes / 60,
+                            progress.goal_minutes / 60
+                        ),
+                        &theme,
+                    ));
+                });
+            }
+        });
+        ui.add_space(18.0);
     }
 }

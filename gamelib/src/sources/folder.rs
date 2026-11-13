@@ -252,7 +252,7 @@ mod tests {
     fn scans_a_folder_of_games() {
         let root = tempfile::tempdir().unwrap();
         let r = root.path();
-        write(&r.join("Ember Road/EmberRoad.exe"), 100);
+        write(&r.join("Ember Road").join("EmberRoad.exe"), 100);
         write(&r.join("Ember Road/unins000.exe"), 5000);
         write(&r.join("Deep Game/a/b/deep.EXE"), 10); // 3 levels: found
         write(&r.join("Too Deep/a/b/c/hidden.exe"), 10); // 4 levels: not found
@@ -273,11 +273,11 @@ mod tests {
         assert_eq!(ember.install_dir, Some(r.join("Ember Road")));
         assert_eq!(
             ember.launch,
-            LaunchTarget::exe(r.join("Ember Road/EmberRoad.exe"))
+            LaunchTarget::exe(r.join("Ember Road").join("EmberRoad.exe"))
         );
         assert_eq!(
             ember.source_id,
-            r.join("Ember Road/EmberRoad.exe").to_string_lossy()
+            r.join("Ember Road").join("EmberRoad.exe").to_string_lossy()
         );
     }
 

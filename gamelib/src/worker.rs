@@ -50,7 +50,19 @@ pub enum Job {
     /// Save the games ticked on the import review screen.
     Import(Vec<DetectedGame>),
     /// Start a game and track its playtime.
-    Launch { game_id: i64 },
+    Launch {
+        game_id: i64,
+        /// Which launch options to use.
+        profile: ProfileChoice,
+    },
+    /// Measure how much disk space each installed game takes.
+    MeasureDisk,
+    /// Ask GitHub whether a newer GameLib has been released.
+    CheckForUpdates,
+    /// List the connected peripherals and paired Bluetooth devices.
+    ScanDevices,
+    /// Connect or disconnect a paired Bluetooth device.
+    SetBluetooth { address: u64, connect: bool },
     /// Find covers, icons and store info for games that lack them. Games
     /// looked up recently without luck are skipped unless `retry_all`.
     FetchMissingCovers { retry_all: bool },
@@ -71,6 +83,18 @@ pub enum Job {
     },
     /// Finish the current job and stop the worker.
     Shutdown,
+}
+
+/// Which launch profile to start a game with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProfileChoice {
+    /// The game's default profile, if it has one.
+    #[default]
+    Default,
+    /// No extra options.
+    Plain,
+    /// This profile.
+    Profile(i64),
 }
 
 /// What the worker reports back.
@@ -128,6 +152,29 @@ pub enum WorkerResult {
     FriendsUpdated(Vec<Friend>),
     /// Claude's answer, or why there isn't one.
     AssistantReply(Result<String, String>),
+    /// How far through measuring install folders the worker is.
+    DiskProgress {
+        done: usize,
+        total: usize,
+    },
+    DiskMeasured {
+        games: usize,
+        bytes: u64,
+    },
+    /// The result of checking for a newer version.
+    UpdateChecked(Result<crate::updates::UpdateCheck, String>),
+    /// What's plugged in, and the paired Bluetooth devices (or why they
+    /// couldn't be listed).
+    DevicesFound {
+        devices: Result<Vec<crate::devices::Device>, String>,
+        bluetooth: Result<Vec<crate::devices::BtDevice>, String>,
+    },
+    /// A Bluetooth device was connected or disconnected (or wasn't).
+    BluetoothChanged {
+        address: u64,
+        connect: bool,
+        result: Result<(), String>,
+    },
     /// Something went wrong. Show `message` in the status bar; the app
     /// carries on.
     Error {
@@ -170,6 +217,17 @@ impl Worker {
     /// sent; the UI passes something that calls `ctx.request_repaint()`,
     /// so the window redraws even if the mouse isn't moving.
     pub fn spawn(config: WorkerConfig, wake: impl Fn() + Send + Sync + 'static) -> Result<Worker> {
+        Worker::spawn_observed(config, wake, |_| {})
+    }
+
+    /// Like [`Worker::spawn`], and `observe` also sees every result as it
+    /// is sent, on the thread that sends it. The UI uses this to show a
+    /// desktop notification while its window is hidden and not drawing.
+    pub fn spawn_observed(
+        config: WorkerConfig,
+        wake: impl Fn() + Send + Sync + 'static,
+        observe: impl Fn(&WorkerResult) + Send + Sync + 'static,
+    ) -> Result<Worker> {
         // Open the database here, so a failure is reported to the caller
         // straight away rather than lost inside the thread.
         let db = Db::open(&config.db_path)?;
@@ -183,6 +241,7 @@ impl Worker {
         let reporter = Reporter {
             results: result_tx,
             wake: Arc::new(wake),
+            observe: Arc::new(observe),
         };
         let thread = thread::Builder::new()
             .name("gamelib-worker".into())
@@ -256,10 +315,12 @@ impl Drop for Worker {
 struct Reporter {
     results: Sender<WorkerResult>,
     wake: Arc<dyn Fn() + Send + Sync>,
+    observe: Arc<dyn Fn(&WorkerResult) + Send + Sync>,
 }
 
 impl Reporter {
     fn send(&self, result: WorkerResult) {
+        (self.observe)(&result);
         // If the UI has gone away there is nobody to tell; that's fine.
         let _ = self.results.send(result);
         (self.wake)();
@@ -291,7 +352,7 @@ impl WorkerState {
             Job::ScanLibrary => "Scan failed".to_string(),
             Job::ScanFolders => "Folder scan failed".to_string(),
             Job::Import(_) => "Import failed".to_string(),
-            Job::Launch { game_id } => match self.db.get_game(*game_id) {
+            Job::Launch { game_id, .. } => match self.db.get_game(*game_id) {
                 Ok(Some(game)) => format!("Couldn't start {}", game.title),
                 _ => "Couldn't start the game".to_string(),
             },
@@ -300,13 +361,48 @@ impl WorkerState {
             }
             Job::RefreshFriends => "Couldn't update friends".to_string(),
             Job::AskClaude { .. } => "Couldn't ask Claude".to_string(),
+            Job::MeasureDisk => "Couldn't measure disk use".to_string(),
+            Job::CheckForUpdates => "Couldn't check for updates".to_string(),
+            Job::ScanDevices => "Couldn't list devices".to_string(),
+            Job::SetBluetooth { .. } => "Bluetooth".to_string(),
             Job::Shutdown => return,
         };
         let outcome = match job {
             Job::ScanLibrary => self.scan_library(),
             Job::ScanFolders => self.scan_folders(),
             Job::Import(games) => self.import(&games),
-            Job::Launch { game_id } => self.launch(game_id),
+            Job::Launch { game_id, profile } => self.launch(game_id, profile),
+            Job::MeasureDisk => self.measure_disk(),
+            Job::ScanDevices => {
+                let devices = crate::devices::list_devices().map_err(|e| format!("{e:#}"));
+                let bluetooth = crate::devices::bluetooth_devices().map_err(|e| format!("{e:#}"));
+                self.reporter
+                    .send(WorkerResult::DevicesFound { devices, bluetooth });
+                Ok(())
+            }
+            Job::SetBluetooth { address, connect } => {
+                // Connecting can take several seconds; don't hold up other jobs.
+                let reporter = self.reporter.clone();
+                (|| -> Result<()> {
+                    thread::Builder::new()
+                        .name("gamelib-bluetooth".into())
+                        .spawn(move || {
+                            let result = crate::devices::set_bluetooth_connected(address, connect)
+                                .map_err(|e| format!("{e:#}"));
+                            reporter.send(WorkerResult::BluetoothChanged {
+                                address,
+                                connect,
+                                result,
+                            });
+                        })?;
+                    Ok(())
+                })()
+            }
+            Job::CheckForUpdates => {
+                let result = crate::updates::check().map_err(|err| format!("{err:#}"));
+                self.reporter.send(WorkerResult::UpdateChecked(result));
+                Ok(())
+            }
             Job::FetchMissingCovers { retry_all } => self.fetch_missing_covers(retry_all),
             Job::FetchCover {
                 game_id,
@@ -393,8 +489,41 @@ impl WorkerState {
         Ok(())
     }
 
-    fn launch(&self, game_id: i64) -> Result<()> {
-        let game = self.db.require_game(game_id)?;
+    fn measure_disk(&self) -> Result<()> {
+        let games: Vec<_> = self
+            .db
+            .list_games()?
+            .into_iter()
+            .filter(|g| g.installed && g.install_dir.is_some())
+            .collect();
+        let total = games.len();
+        let mut bytes = 0;
+        let mut measured = 0;
+        for (done, game) in games.iter().enumerate() {
+            if let Some(size) = crate::health::measure_install(&self.db, game, crate::now())? {
+                bytes += size;
+                measured += 1;
+            }
+            self.reporter.send(WorkerResult::DiskProgress {
+                done: done + 1,
+                total,
+            });
+        }
+        self.reporter.send(WorkerResult::DiskMeasured {
+            games: measured,
+            bytes,
+        });
+        Ok(())
+    }
+
+    fn launch(&self, game_id: i64, choice: ProfileChoice) -> Result<()> {
+        let mut game = self.db.require_game(game_id)?;
+        let profile = match choice {
+            ProfileChoice::Default => self.db.default_launch_profile(game_id)?,
+            ProfileChoice::Plain => None,
+            ProfileChoice::Profile(id) => self.db.launch_profile(id)?,
+        };
+        game.launch = crate::profiles::apply(&game, profile.as_ref());
         launcher::launch(&game)?;
         let daily_stardust = self.db.award_daily_launch(game_id, crate::now())?;
         self.reporter.send(WorkerResult::Launched {
@@ -863,7 +992,10 @@ mod tests {
     #[test]
     fn errors_come_back_as_results_and_the_worker_keeps_going() {
         let f = Fixture::new();
-        f.worker.send(Job::Launch { game_id: 404 });
+        f.worker.send(Job::Launch {
+            game_id: 404,
+            profile: ProfileChoice::Default,
+        });
         let WorkerResult::Error { context, message } = f.next() else {
             panic!("expected an error");
         };
@@ -875,7 +1007,10 @@ mod tests {
             .db()
             .add_manual_game("Gone", std::path::Path::new("/nowhere/gone.exe"), 1)
             .unwrap();
-        f.worker.send(Job::Launch { game_id: id });
+        f.worker.send(Job::Launch {
+            game_id: id,
+            profile: ProfileChoice::Default,
+        });
         let WorkerResult::Error { context, .. } = f.next() else {
             panic!("expected an error");
         };

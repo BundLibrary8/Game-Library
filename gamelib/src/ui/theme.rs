@@ -159,6 +159,17 @@ impl Theme {
     }
 
     /// The small line above "Library".
+    /// The same look with stronger contrast: brighter text, bolder
+    /// borders and solid panels, for readability.
+    pub fn high_contrast(mut self) -> Theme {
+        self.text = Color32::WHITE;
+        self.muted = mix(self.muted, Color32::WHITE, 0.55);
+        self.border = mix(self.border, Color32::WHITE, 0.5).to_opaque();
+        self.panel = self.opaque(self.panel);
+        self.panel_alt = lighten(self.opaque(self.panel_alt), 0.08);
+        self
+    }
+
     pub fn tagline(&self) -> &'static str {
         match self.backdrop {
             Backdrop::Constellation => "Your universe",
