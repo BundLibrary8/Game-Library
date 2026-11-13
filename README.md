@@ -134,7 +134,7 @@ needs an internet connection the first time; if you are offline it tries
 again next start.
 
 The icons down the left are Profile, Home, Library, Discover, Assistant,
-Game Room, Franchises, Stats, Shop, Friends, Mod library, Library health,
+Franchises, Stats, Shop, Friends, Mod library, Library health,
 Devices and Settings. The TV icon at the bottom opens
 **Couch Mode**.
 
@@ -216,13 +216,8 @@ Wikipedia article. A free SteamGridDB key (Settings) still gives the widest
 choice. Games without a cover are looked up again straight after this
 update; use **Settings → Download missing covers** to try again any time.
 
-### Game Room, Friends, Mod library and achievements
+### Friends, Mod library and achievements
 
-- **Game Room** (couch icon): your own virtual gaming room. A window onto
-  your background, a TV showing what you're playing (with a Play button), a
-  shelf of favourites (or most played, or recent), a poster of your most
-  played game, a trophy cabinet, and online friends on the couch. Choose
-  the shelf and wall colour at the top.
 - **Friends** (two people icon): what your Steam friends own and play,
   what's hot among them, and the games you have in common. Press **Refresh
   their games**. Needs the Steam Web API key (Settings) and your Steam
