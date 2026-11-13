@@ -1,0 +1,8 @@
+{
+  "total": 3,
+  "items": [
+    { "type": "app", "name": "Fortnite Festival Pack", "id": 111, "tiny_image": "https://example.invalid/a.jpg" },
+    { "type": "app", "name": "Untitled Goose Game", "id": 837470, "tiny_image": "https://example.invalid/b.jpg" },
+    { "type": "sub", "name": "Untitled Goose Game", "id": 999, "tiny_image": "https://example.invalid/c.jpg" }
+  ]
+}

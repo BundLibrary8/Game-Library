@@ -35,6 +35,10 @@ use crate::playtime::{self, SystemEnvironment, Timings, TrackEvent};
 use crate::sources::{self, GameSource, ScanReport, folder::FolderSource};
 use crate::{artwork, launcher, metadata};
 
+/// How long to wait before looking online again for a game whose cover
+/// couldn't be found anywhere.
+const ART_RETRY_SECS: i64 = 7 * 86_400;
+
 /// Work the UI can ask for.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Job {
@@ -47,8 +51,9 @@ pub enum Job {
     Import(Vec<DetectedGame>),
     /// Start a game and track its playtime.
     Launch { game_id: i64 },
-    /// Download covers (and Steam Store info) for every game without one.
-    FetchMissingCovers,
+    /// Find covers, icons and store info for games that lack them. Games
+    /// looked up recently without luck are skipped unless `retry_all`.
+    FetchMissingCovers { retry_all: bool },
     /// Download one game's cover again, optionally searching for a
     /// different title ("Search again").
     FetchCover {
@@ -102,6 +107,11 @@ pub enum WorkerResult {
     /// Description/genres/year were saved for this game.
     InfoReady {
         game_id: i64,
+    },
+    /// How far through looking for covers online the worker is.
+    CoverProgress {
+        done: usize,
+        total: usize,
     },
     /// A batch of cover downloads finished.
     CoversFinished {
@@ -276,7 +286,9 @@ impl WorkerState {
                 Ok(Some(game)) => format!("Couldn't start {}", game.title),
                 _ => "Couldn't start the game".to_string(),
             },
-            Job::FetchMissingCovers | Job::FetchCover { .. } => "Cover download failed".to_string(),
+            Job::FetchMissingCovers { .. } | Job::FetchCover { .. } => {
+                "Cover download failed".to_string()
+            }
             Job::RefreshFriends => "Couldn't update friends".to_string(),
             Job::Shutdown => return,
         };
@@ -285,7 +297,7 @@ impl WorkerState {
             Job::ScanFolders => self.scan_folders(),
             Job::Import(games) => self.import(&games),
             Job::Launch { game_id } => self.launch(game_id),
-            Job::FetchMissingCovers => self.fetch_missing_covers(),
+            Job::FetchMissingCovers { retry_all } => self.fetch_missing_covers(retry_all),
             Job::FetchCover {
                 game_id,
                 search_title,
@@ -483,7 +495,8 @@ impl WorkerState {
     }
 
     /// Download one game's cover, trying each place it might be:
-    /// 1. Steam's public image servers (Steam games; no key needed)
+    /// 1. Steam's public image servers (no key needed). Games from other
+    ///    launchers are matched to Steam by their exact title.
     /// 2. SteamGridDB (any game; needs the key from Settings)
     /// 3. the game's wide Steam Store banner, made into a cover
     ///
@@ -495,36 +508,67 @@ impl WorkerState {
         game: &Game,
     ) -> Result<Option<PathBuf>> {
         let covers_dir = &self.config.covers_dir;
-        if game.source == Source::Steam {
-            for url in artwork::steam_cdn_cover_urls(&game.source_id) {
+        // Set if any server couldn't be reached. Then "nothing found" isn't
+        // trustworthy, and the game must be tried again another time.
+        let mut unreachable = false;
+        let mut note = |what: &str, err: &anyhow::Error| {
+            unreachable |= metadata::is_unreachable(err);
+            log::info!("{what} for {}: {err:#}", game.title);
+        };
+
+        // A Steam game's app id is known. For anything else, see whether
+        // Steam sells a game with exactly the same name.
+        let steam_app = if game.source == Source::Steam {
+            Some(game.source_id.clone())
+        } else {
+            metadata::find_steam_app(client, &game.title).unwrap_or_else(|err| {
+                note("Steam search failed", &err);
+                None
+            })
+        };
+        if let Some(app_id) = &steam_app {
+            for url in artwork::steam_cdn_cover_urls(app_id) {
                 match metadata::download_cover(client, &url, covers_dir, game.id) {
                     Ok(path) => return Ok(Some(path)),
-                    Err(err) => log::info!("no cover for {} at {url}: {err:#}", game.title),
+                    Err(err) => note("no cover on Steam's image server", &err),
                 }
             }
         }
         if let Some(api_key) = api_key {
             match metadata::find_cover_url(client, api_key, game, None) {
                 Ok(Some(url)) => {
-                    return metadata::download_cover(client, &url, covers_dir, game.id).map(Some);
+                    match metadata::download_cover(client, &url, covers_dir, game.id) {
+                        Ok(path) => return Ok(Some(path)),
+                        Err(err) => note("SteamGridDB download failed", &err),
+                    }
                 }
                 Ok(None) => {}
-                Err(err) => log::info!("SteamGridDB had nothing for {}: {err:#}", game.title),
+                Err(err) => note("SteamGridDB had nothing", &err),
             }
         }
-        if game.source == Source::Steam
-            && let Some(info) = metadata::fetch_store_info(client, &game.source_id)?
-        {
-            // The store reply also has the description and requirements.
-            self.save_store_info(game, &info)?;
-            if let Some(url) = info.header_image {
-                return metadata::download_cover(client, &url, covers_dir, game.id).map(Some);
+        if let Some(app_id) = &steam_app {
+            match metadata::fetch_store_info(client, app_id) {
+                Ok(Some(info)) => {
+                    // The store reply also has the description and requirements.
+                    self.save_store_info(game, &info)?;
+                    if let Some(url) = info.header_image {
+                        match metadata::download_cover(client, &url, covers_dir, game.id) {
+                            Ok(path) => return Ok(Some(path)),
+                            Err(err) => note("store banner download failed", &err),
+                        }
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => note("Steam Store lookup failed", &err),
             }
+        }
+        if unreachable {
+            anyhow::bail!("the artwork servers couldn't be reached");
         }
         Ok(None)
     }
 
-    fn fetch_missing_covers(&self) -> Result<()> {
+    fn fetch_missing_covers(&self, retry_all: bool) -> Result<()> {
         let mut downloaded = self.find_local_artwork()?;
         let mut failed = 0;
 
@@ -534,12 +578,18 @@ impl WorkerState {
             .api_key(keys::STEAMGRIDDB_KEY, "SteamGridDB API key")
             .ok();
 
+        // Games with no art anywhere would otherwise be looked up again on
+        // every start, so each is only retried after a while.
+        let retry_after = if retry_all { 0 } else { ART_RETRY_SECS };
+        let due = self.db.games_due_cover_lookup(crate::now(), retry_after)?;
+        let total = due.len();
+        let mut offline = false;
+
         // One at a time, with a pause, to be polite to the servers. One
         // failure doesn't stop the rest.
-        for game in self.db.games_without_cover()? {
-            if game.source != Source::Steam && api_key.is_none() {
-                continue; // nowhere to look for this one
-            }
+        for (index, game) in due.into_iter().enumerate() {
+            self.reporter
+                .send(WorkerResult::CoverProgress { done: index, total });
             match self.download_cover_for(&client, api_key.as_deref(), &game) {
                 Ok(Some(path)) => {
                     if self.db.set_cover_auto(game.id, &path)? {
@@ -549,11 +599,25 @@ impl WorkerState {
                             path,
                         });
                     }
+                    self.db.mark_art_checked(game.id, crate::now())?;
                 }
-                Ok(None) => log::info!("no cover found for {}", game.title),
+                Ok(None) => {
+                    log::info!("no cover found for {}", game.title);
+                    self.db.mark_art_checked(game.id, crate::now())?;
+                }
+                // A failure (no internet, say) isn't recorded as checked,
+                // so the game is tried again next time.
                 Err(err) => {
                     failed += 1;
                     log::warn!("cover for {} failed: {err:#}", game.title);
+                    // If the very first game can't reach any server, the
+                    // rest won't either: stop rather than wait through a
+                    // timeout for every game in the library.
+                    if index == 0 {
+                        failed = total;
+                        offline = true;
+                        break;
+                    }
                 }
             }
             thread::sleep(metadata::REQUEST_PAUSE);
@@ -563,7 +627,9 @@ impl WorkerState {
         // games that lack them.
         let extras = self.db.all_extras()?;
         let needs_info = self.db.list_games()?.into_iter().filter(|g| {
-            g.source == Source::Steam
+            // No point asking if the servers couldn't be reached just now.
+            !offline
+                && g.source == Source::Steam
                 && (g.description.is_none()
                     || extras
                         .get(&g.id)
@@ -584,7 +650,12 @@ impl WorkerState {
                 Ok(None) => {
                     self.db.set_requirements(game.id, Some(""), None)?;
                 }
-                Err(err) => log::warn!("store info for {} failed: {err:#}", game.title),
+                Err(err) => {
+                    log::warn!("store info for {} failed: {err:#}", game.title);
+                    if metadata::is_unreachable(&err) {
+                        break; // offline: the rest would fail the same way
+                    }
+                }
             }
             thread::sleep(metadata::REQUEST_PAUSE);
         }

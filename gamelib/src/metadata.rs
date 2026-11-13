@@ -21,6 +21,7 @@ use crate::model::{Game, Source};
 
 const SGDB_API: &str = "https://www.steamgriddb.com/api/v2";
 const STEAM_STORE_API: &str = "https://store.steampowered.com/api/appdetails";
+const STEAM_SEARCH_API: &str = "https://store.steampowered.com/api/storesearch/";
 const COVER_DIMENSIONS: &str = "600x900";
 /// Wait this long between requests, to be polite and avoid rate limits.
 pub const REQUEST_PAUSE: Duration = Duration::from_millis(500);
@@ -139,6 +140,16 @@ pub fn find_cover_url(
     };
     let urls = grids_for(client, api_key, &["grids", "game", &best.id.to_string()])?;
     Ok(urls.into_iter().next())
+}
+
+/// Did this request fail because the server couldn't be reached at all
+/// (no internet, a timeout), rather than because the server answered "no"?
+/// The difference matters: "not there" is an answer worth remembering,
+/// while "couldn't ask" should be tried again.
+pub fn is_unreachable(err: &anyhow::Error) -> bool {
+    err.chain()
+        .filter_map(|cause| cause.downcast_ref::<reqwest::Error>())
+        .any(|request| request.status().is_none())
 }
 
 /// Download a file into memory, refusing anything suspiciously large.
@@ -261,6 +272,62 @@ pub fn parse_store_details(json: &str, app_id: &str) -> Result<Option<StoreInfo>
     }))
 }
 
+#[derive(Deserialize)]
+struct StoreSearch {
+    #[serde(default)]
+    items: Vec<StoreSearchItem>,
+}
+
+#[derive(Deserialize)]
+struct StoreSearchItem {
+    #[serde(default, rename = "type")]
+    kind: String,
+    name: String,
+    id: u64,
+}
+
+/// Letters and digits only, lower case, so "Untitled Goose Game™" and
+/// "untitled goose game" compare equal.
+fn plain_title(title: &str) -> String {
+    title
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// Pick the Steam app whose name is the same as `title` out of a store
+/// search reply. Only an exact match (ignoring case and punctuation) is
+/// accepted: a near miss would put the wrong game's art on the cover,
+/// which is worse than no art.
+pub fn parse_store_search(json: &str, title: &str) -> Result<Option<String>> {
+    let parsed: StoreSearch =
+        serde_json::from_str(json).context("unexpected reply from the Steam Store search")?;
+    let wanted = plain_title(title);
+    if wanted.is_empty() {
+        return Ok(None);
+    }
+    Ok(parsed
+        .items
+        .into_iter()
+        .find(|item| item.kind == "app" && plain_title(&item.name) == wanted)
+        .map(|item| item.id.to_string()))
+}
+
+/// Look a game up on the Steam Store by its title and return its app id,
+/// if Steam sells a game with exactly that name. No key is needed. This
+/// is how games from other launchers get real cover art.
+pub fn find_steam_app(client: &Client, title: &str) -> Result<Option<String>> {
+    let json = client
+        .get(STEAM_SEARCH_API)
+        .query(&[("term", title), ("l", "english"), ("cc", "us")])
+        .send()
+        .context("couldn't reach the Steam Store search")?
+        .error_for_status()?
+        .text()?;
+    parse_store_search(&json, title)
+}
+
 /// Fetch a Steam game's store info.
 pub fn fetch_store_info(client: &Client, app_id: &str) -> Result<Option<StoreInfo>> {
     let json = client
@@ -353,6 +420,23 @@ mod tests {
         let info = parse_store_details(bare, "5").unwrap().unwrap();
         assert_eq!(info.requirements_min, None);
         assert!(parse_store_details("[]", "570").is_err());
+    }
+
+    #[test]
+    fn store_search_only_accepts_an_exact_title_match() {
+        const SEARCH: &str = include_str!("../tests/fixtures/steam_storesearch.json");
+        let find = |title: &str| parse_store_search(SEARCH, title).unwrap();
+        assert_eq!(find("Untitled Goose Game"), Some("837470".to_string()));
+        assert_eq!(find("untitled goose game™"), Some("837470".to_string()));
+        assert_eq!(
+            find("Fortnite"),
+            None,
+            "a pack with a longer name is not the game"
+        );
+        assert_eq!(find("Something Else"), None);
+        assert_eq!(find("!!!"), None);
+        assert!(parse_store_search("<html>", "x").is_err());
+        assert_eq!(parse_store_search("{}", "x").unwrap(), None);
     }
 
     #[test]

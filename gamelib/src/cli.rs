@@ -191,7 +191,7 @@ pub fn run(args: &[String]) -> Result<()> {
         }
         "covers" => {
             let worker = start_worker()?;
-            worker.send(Job::FetchMissingCovers);
+            worker.send(Job::FetchMissingCovers { retry_all: true });
             loop {
                 match wait(&worker, 600)? {
                     WorkerResult::CoverReady { game_id, path } => {

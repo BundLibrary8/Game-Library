@@ -356,7 +356,14 @@ impl GameLibApp {
             forced_backdrop,
         };
         if app.db.get_bool_setting(keys::SCAN_ON_STARTUP, false)? {
+            // The scan looks for artwork itself when it finishes.
             app.start_job(Job::ScanLibrary, "Scanning for games…");
+        } else {
+            // Find artwork for anything that lacks it, without being asked.
+            app.start_job(
+                Job::FetchMissingCovers { retry_all: false },
+                "Finding artwork…",
+            );
         }
         Ok(app)
     }
@@ -438,7 +445,10 @@ impl GameLibApp {
                     self.job_done();
                     self.status = format!("Scan finished: {}", report.summary());
                     // Fetch covers and info for anything new.
-                    self.start_job(Job::FetchMissingCovers, "Getting covers and info…");
+                    self.start_job(
+                        Job::FetchMissingCovers { retry_all: false },
+                        "Getting covers and info…",
+                    );
                 }
                 WorkerResult::FolderCandidates(candidates) => {
                     self.job_done();
@@ -453,7 +463,10 @@ impl GameLibApp {
                 WorkerResult::Imported { added, .. } => {
                     self.job_done();
                     self.status = format!("Added {added} games.");
-                    self.start_job(Job::FetchMissingCovers, "Getting covers and info…");
+                    self.start_job(
+                        Job::FetchMissingCovers { retry_all: false },
+                        "Getting covers and info…",
+                    );
                 }
                 WorkerResult::Launched {
                     game_id,
@@ -507,13 +520,21 @@ impl GameLibApp {
                 WorkerResult::IconReady { path, .. } => {
                     ctx.forget_image(&paint::file_uri(&path));
                 }
+                WorkerResult::CoverProgress { done, total } => {
+                    self.status = format!("Finding artwork… {} of {total}", done + 1);
+                }
                 WorkerResult::InfoReady { .. } => {}
                 WorkerResult::CoversFinished { downloaded, failed } => {
                     self.job_done();
-                    self.status = if downloaded > 0 || failed > 0 {
-                        format!("Found {downloaded} covers ({failed} failed).")
-                    } else {
-                        String::new()
+                    self.status = match (downloaded, failed) {
+                        (0, 0) => String::new(),
+                        (0, _) => format!(
+                            "Couldn't get artwork for {failed} games (no internet?). It will be tried again next time."
+                        ),
+                        (_, 0) => format!("Found artwork for {downloaded} games."),
+                        _ => format!(
+                            "Found artwork for {downloaded} games; {failed} will be tried again next time."
+                        ),
                     };
                 }
                 WorkerResult::FriendsUpdated(friends) => {

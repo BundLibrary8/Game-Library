@@ -17,10 +17,18 @@ background you pick in Settings or the Shop:
 
 The animation can be turned off in Settings.
 
-**Game artwork** is found automatically, with no key needed: Steam covers
-are copied from Steam's own library cache (or Steam's public image
-server), and every game's icon is read out of its exe. A SteamGridDB key
-in Settings adds covers for non-Steam games.
+**Game artwork** is found automatically, with no key needed, each time
+the app starts and after every scan:
+
+- Steam covers are copied from Steam's own library cache, or downloaded
+  from Steam's public image servers.
+- Games from other launchers are looked up on the Steam Store by their
+  exact title, and use that game's Steam cover if there is one.
+- Every game's icon is read out of its exe.
+- A SteamGridDB key in Settings adds covers for games Steam doesn't have.
+
+A game with no art anywhere is only looked up again after a week. If the
+servers can't be reached, nothing is recorded and it retries next start.
 
 The same program also has command-line commands (`src/cli.rs`).
 

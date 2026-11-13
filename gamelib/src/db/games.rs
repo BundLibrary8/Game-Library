@@ -350,6 +350,31 @@ impl Db {
         Ok(())
     }
 
+    /// Games with no cover that are due an online lookup: ones never
+    /// looked up, or last looked up more than `retry_after_secs` ago.
+    /// Pass 0 to get every game without a cover.
+    pub fn games_due_cover_lookup(&self, now: i64, retry_after_secs: i64) -> Result<Vec<Game>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {GAME_COLUMNS} FROM games
+             WHERE cover_path IS NULL
+               AND (art_checked_at IS NULL OR art_checked_at <= ?1)
+             ORDER BY id"
+        ))?;
+        let games = stmt
+            .query_map([now - retry_after_secs], game_from_row)?
+            .collect::<Result<_, _>>()?;
+        Ok(games)
+    }
+
+    /// Note that a game's artwork has just been looked for online.
+    pub fn mark_art_checked(&self, game_id: i64, now: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE games SET art_checked_at = ?2 WHERE id = ?1",
+            params![game_id, now],
+        )?;
+        Ok(())
+    }
+
     /// Record the icon read out of a game's exe.
     pub fn set_icon(&self, game_id: i64, icon: &Path) -> Result<()> {
         self.conn.execute(
@@ -748,6 +773,41 @@ mod tests {
             db.require_game(id).unwrap().cover_path,
             Some(PathBuf::from("/covers/mine.png"))
         );
+    }
+
+    #[test]
+    fn cover_lookups_are_not_repeated_until_the_retry_time() {
+        let db = Db::open_in_memory().unwrap();
+        let a = db
+            .upsert_detected(&steam_game("1", "A"), 1)
+            .unwrap()
+            .game_id;
+        let b = db
+            .upsert_detected(&steam_game("2", "B"), 1)
+            .unwrap()
+            .game_id;
+        let week = 7 * 86_400;
+        let due = |now: i64, retry: i64| -> Vec<i64> {
+            db.games_due_cover_lookup(now, retry)
+                .unwrap()
+                .iter()
+                .map(|g| g.id)
+                .collect()
+        };
+        assert_eq!(due(1000, week), [a, b], "never looked up: both due");
+
+        db.mark_art_checked(a, 1000).unwrap();
+        assert_eq!(due(2000, week), [b], "A was only just checked");
+        assert_eq!(
+            due(1000 + week, week),
+            [a, b],
+            "a week later A is due again"
+        );
+        assert_eq!(due(2000, 0), [a, b], "a retry time of 0 means everything");
+
+        // A game that has a cover is never due.
+        db.set_cover_auto(b, Path::new("/covers/2.jpg")).unwrap();
+        assert_eq!(due(2000, 0), [a]);
     }
 
     #[test]
