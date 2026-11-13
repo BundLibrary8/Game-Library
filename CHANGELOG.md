@@ -6,6 +6,10 @@ before tagging a release.
 
 ## [0.2.0]
 
+- GameLib accounts (Supabase): create an account, log in (remembered
+  between runs), add friends by username, accept requests, and see
+  friends' libraries and stats. Your library and stats are shared with
+  friends you accept. Database setup is in `supabase/schema.sql`.
 - Covers for games that aren't on Steam: Epic games from the Epic
   launcher's catalogue, everything else (Valorant, League of Legends…) from
   Wikipedia. Games without a cover are looked up again.

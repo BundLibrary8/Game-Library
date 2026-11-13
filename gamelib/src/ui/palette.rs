@@ -119,6 +119,12 @@ impl GameLibApp {
         }
         add("Profile".into(), "Go to", Command::Go(Screen::Profile), 8);
         add(
+            "GameLib account (log in)".into(),
+            "Go to",
+            Command::Go(Screen::Account),
+            8,
+        );
+        add(
             "Achievement tracker".into(),
             "Go to",
             Command::Go(Screen::Achievements),

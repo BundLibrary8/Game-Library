@@ -27,6 +27,7 @@ pub mod artwork;
 pub mod assistant;
 pub mod backlog;
 pub mod backup;
+pub mod cloud;
 pub mod covers_extra;
 pub mod csvio;
 pub mod db;

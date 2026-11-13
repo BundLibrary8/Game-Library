@@ -68,6 +68,8 @@ pub enum Job {
     FetchAchievements { game_id: Option<i64> },
     /// Read which games each Steam friend owns.
     FetchFriendGames,
+    /// Something with your GameLib account.
+    Cloud(CloudJob),
     /// Switch on (or off) noticing games started outside GameLib (from
     /// Steam, a desktop shortcut…) and tracking their playtime too.
     WatchForGames(bool),
@@ -91,6 +93,67 @@ pub enum Job {
     },
     /// Finish the current job and stop the worker.
     Shutdown,
+}
+
+/// A password: kept out of logs and debug output.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Secret(pub String);
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(***)")
+    }
+}
+
+/// Things to do with your GameLib account (Supabase).
+#[derive(Debug, Clone, PartialEq)]
+pub enum CloudJob {
+    SignUp {
+        username: String,
+        email: String,
+        password: Secret,
+    },
+    LogIn {
+        email: String,
+        password: Secret,
+    },
+    LogOut,
+    /// Check the saved login still works and fetch the profile.
+    Check,
+    /// Upload your library and stats (if sharing is on).
+    Share,
+    /// Delete your shared library and stats.
+    Unshare,
+    Friends,
+    AddFriend(String),
+    Respond {
+        request: i64,
+        accept: bool,
+    },
+    RemoveFriend(String),
+    FriendLibrary(String),
+    UpdateProfile {
+        display_name: String,
+        bio: String,
+    },
+}
+
+/// What a [`CloudJob`] found.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CloudResult {
+    /// Logged in as this account (or `None`: logged out).
+    Account(Option<(crate::cloud::Profile, String)>),
+    /// Signed up; Supabase emailed a confirmation link.
+    ConfirmEmail,
+    Friends(Vec<crate::cloud::Friendship>),
+    FriendLibrary {
+        user_id: String,
+        games: Vec<crate::cloud::SharedGame>,
+        stats: Option<crate::cloud::SharedStats>,
+    },
+    /// Something worth a line in the status bar.
+    Done(String),
+    Failed(String),
 }
 
 /// Which launch profile to start a game with.
@@ -188,6 +251,8 @@ pub enum WorkerResult {
         friends: usize,
         private: usize,
     },
+    /// A GameLib account job finished.
+    Cloud(CloudResult),
     /// A Bluetooth device was connected or disconnected (or wasn't).
     BluetoothChanged {
         address: u64,
@@ -246,6 +311,7 @@ impl Job {
                 | Job::AskClaude { .. }
                 | Job::CheckForUpdates
                 | Job::WatchForGames(_)
+                | Job::Cloud(_)
         )
     }
 }
@@ -473,6 +539,7 @@ impl WorkerState {
             Job::WatchForGames(_) => "Couldn't watch for games".to_string(),
             Job::FetchAchievements { .. } => "Couldn't read achievements".to_string(),
             Job::FetchFriendGames => "Couldn't read your friends' games".to_string(),
+            Job::Cloud(_) => "GameLib account".to_string(),
             Job::Shutdown => return,
         };
         let outcome = match job {
@@ -484,6 +551,13 @@ impl WorkerState {
             Job::WatchForGames(on) => self.watch_for_games(on),
             Job::FetchAchievements { game_id } => self.fetch_achievements(game_id),
             Job::FetchFriendGames => self.fetch_friend_games(),
+            Job::Cloud(job) => {
+                let result = self
+                    .cloud(job)
+                    .unwrap_or_else(|err| CloudResult::Failed(format!("{err:#}")));
+                self.reporter.send(WorkerResult::Cloud(result));
+                Ok(())
+            }
             Job::ScanDevices => {
                 let devices = crate::devices::list_devices().map_err(|e| format!("{e:#}"));
                 let bluetooth = crate::devices::bluetooth_devices().map_err(|e| format!("{e:#}"));
@@ -1092,6 +1166,138 @@ impl WorkerState {
             )?;
         }
         Ok(())
+    }
+
+    fn cloud(&self, job: CloudJob) -> Result<CloudResult> {
+        use crate::cloud::{self, Cloud, RequestOutcome, SignUp};
+        let client = Cloud::new(self.db.cloud_project()?)?;
+        let now = crate::now();
+        let account = |session: &cloud::Session| -> Result<CloudResult> {
+            let profile = client.my_profile(session)?;
+            Ok(CloudResult::Account(Some((profile, session.email.clone()))))
+        };
+        Ok(match job {
+            CloudJob::SignUp {
+                username,
+                email,
+                password,
+            } => match client.sign_up(&username, &email, &password.0, now)? {
+                SignUp::LoggedIn(session) => {
+                    self.db.set_cloud_session(Some(&session))?;
+                    let result = account(&session)?;
+                    self.share_library(&client, &session)?;
+                    result
+                }
+                SignUp::ConfirmEmail => CloudResult::ConfirmEmail,
+            },
+            CloudJob::LogIn { email, password } => {
+                let session = client.log_in(&email, &password.0, now)?;
+                self.db.set_cloud_session(Some(&session))?;
+                let result = account(&session)?;
+                self.share_library(&client, &session)?;
+                result
+            }
+            CloudJob::LogOut => {
+                if let Some(session) = self.db.cloud_session()? {
+                    // Logging out locally works even if Supabase can't be reached.
+                    if let Err(err) = client.log_out(&session) {
+                        log::info!("Supabase log out: {err:#}");
+                    }
+                }
+                self.db.set_cloud_session(None)?;
+                CloudResult::Account(None)
+            }
+            CloudJob::Check => match self.db.cloud_session()? {
+                None => CloudResult::Account(None),
+                Some(_) => {
+                    let session = cloud::fresh_session(&self.db, &client, now)?;
+                    account(&session)?
+                }
+            },
+            CloudJob::Share => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                self.share_library(&client, &session)?;
+                CloudResult::Done("Your library is shared with your friends.".into())
+            }
+            CloudJob::Unshare => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                client.unshare(&session)?;
+                CloudResult::Done("Your library is no longer shared.".into())
+            }
+            CloudJob::Friends => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                CloudResult::Friends(client.friendships(&session)?)
+            }
+            CloudJob::AddFriend(username) => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                let message = match client.send_friend_request(&session, &username)? {
+                    RequestOutcome::Sent => format!("Friend request sent to {}.", username.trim()),
+                    RequestOutcome::Accepted => {
+                        format!("You and {} are now friends.", username.trim())
+                    }
+                    RequestOutcome::AlreadyFriends => {
+                        format!("You've already added {}.", username.trim())
+                    }
+                    RequestOutcome::NotFound => {
+                        format!("There's no GameLib account called {}.", username.trim())
+                    }
+                    RequestOutcome::Yourself => "That's you!".into(),
+                };
+                self.reporter.send(WorkerResult::Cloud(CloudResult::Friends(
+                    client.friendships(&session)?,
+                )));
+                CloudResult::Done(message)
+            }
+            CloudJob::Respond { request, accept } => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                client.respond(&session, request, accept)?;
+                CloudResult::Friends(client.friendships(&session)?)
+            }
+            CloudJob::RemoveFriend(other) => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                client.remove_friend(&session, &other)?;
+                CloudResult::Friends(client.friendships(&session)?)
+            }
+            CloudJob::FriendLibrary(user_id) => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                let (games, stats) = client.friend_library(&session, &user_id)?;
+                CloudResult::FriendLibrary {
+                    user_id,
+                    games,
+                    stats,
+                }
+            }
+            CloudJob::UpdateProfile { display_name, bio } => {
+                let session = cloud::fresh_session(&self.db, &client, now)?;
+                client.update_profile(&session, &display_name, &bio)?;
+                account(&session)?
+            }
+        })
+    }
+
+    /// Upload the library and stats, if sharing is switched on.
+    fn share_library(
+        &self,
+        client: &crate::cloud::Cloud,
+        session: &crate::cloud::Session,
+    ) -> Result<()> {
+        if !self.db.cloud_sharing()? {
+            return Ok(());
+        }
+        let games = self.db.list_games()?;
+        let extras = self.db.all_extras()?;
+        let sessions = self.db.session_rows(i64::MIN)?.len();
+        let achievements = self
+            .db
+            .achievement_completion()?
+            .values()
+            .map(|c| c.unlocked)
+            .sum();
+        client.share(
+            session,
+            &crate::cloud::shared_games(&games, &extras),
+            &crate::cloud::shared_stats(&games, &extras, sessions, achievements),
+        )
     }
 
     /// The Steam Web API key and Steam account, or a clear message about

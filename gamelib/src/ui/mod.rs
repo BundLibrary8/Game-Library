@@ -15,6 +15,7 @@
 //! - `dialogs.rs`: the pop-up windows.
 //! - `couch.rs`: Couch Mode, the full-screen controller-friendly view.
 
+mod account;
 mod achievement_tracker;
 mod admin;
 mod assistant;
@@ -194,6 +195,8 @@ pub enum Screen {
     Mods,
     /// The virtual gaming room.
     GameRoom,
+    /// Your GameLib account (log in, sign up, sharing).
+    Account,
     Franchises,
     Stats,
     Profile,
@@ -217,6 +220,7 @@ impl Screen {
             "friends" => Screen::Friends,
             "mods" => Screen::Mods,
             "room" => Screen::GameRoom,
+            "account" => Screen::Account,
             "wrapped" => Screen::Wrapped(gamelib::patterns::year_of(now(), local_offset())),
             "profile" => Screen::Profile,
             "shop" => Screen::Shop,
@@ -488,6 +492,8 @@ pub struct GameLibApp {
     /// What the Devices screen found.
     devices: devices::DevicesState,
     tracker: achievement_tracker::TrackerState,
+    /// GameLib accounts and friends (Supabase).
+    cloud: account::CloudState,
     friends: friends_screen::FriendsState,
     mod_library: mod_library::ModLibraryState,
     /// Discord Rich Presence, when switched on.
@@ -662,6 +668,7 @@ impl GameLibApp {
             memos: Memos::default(),
             devices: devices::DevicesState::default(),
             tracker: Default::default(),
+            cloud: Default::default(),
             friends: Default::default(),
             mod_library: Default::default(),
             discord: None,
@@ -717,6 +724,7 @@ impl GameLibApp {
             app.couch_fullscreen_pending = true;
         }
         app.start_discord();
+        app.start_cloud();
         // Notice games started from Steam, shortcuts and so on, and track
         // their playtime too.
         if app.db.get_bool_setting(AUTO_DETECT_KEY, true)? {
@@ -840,7 +848,8 @@ impl GameLibApp {
                 | WorkerResult::UpdateChecked(_)
                 | WorkerResult::AssistantReply(_)
                 | WorkerResult::SessionStarted { .. }
-                | WorkerResult::NeverStarted { .. } => {}
+                | WorkerResult::NeverStarted { .. }
+                | WorkerResult::Cloud(_) => {}
                 _ => self.dirty = true,
             }
             match result {
@@ -907,6 +916,7 @@ impl GameLibApp {
                         discord.clear();
                     }
                     self.post_session_to_discord(summary.game_id, summary.duration_secs);
+                    self.cloud_after_session();
                     let length = if summary.duration_secs < 60 {
                         "under a minute".to_string()
                     } else {
@@ -963,6 +973,10 @@ impl GameLibApp {
                 WorkerResult::FriendsUpdated(friends) => {
                     self.job_done();
                     self.status = format!("Friends updated ({}).", friends.len());
+                }
+                WorkerResult::Cloud(result) => {
+                    self.job_done();
+                    self.cloud_result(result);
                 }
                 WorkerResult::AchievementsUpdated { games, failed } => {
                     self.job_done();
@@ -1485,6 +1499,7 @@ impl GameLibApp {
                                     Screen::Friends => self.friends_screen(ui),
                                     Screen::Mods => self.mod_library_screen(ui),
                                     Screen::GameRoom => self.game_room_screen(ui),
+                                    Screen::Account => self.account_screen(ui),
                                     Screen::Franchises => self.franchises_screen(ui),
                                     Screen::Stats => self.stats_screen(ui),
                                     Screen::Profile => self.profile_screen(ui),

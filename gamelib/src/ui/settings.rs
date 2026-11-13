@@ -337,6 +337,40 @@ impl GameLibApp {
                 self.worker.send(gamelib::worker::Job::WatchForGames(auto));
             }
             ui.add_space(10.0);
+            ui.label(paint::strong("GameLib account", 17.0));
+            match &self.cloud.account {
+                Some((profile, email)) => {
+                    ui.label(format!("Logged in as @{} ({email})", profile.username));
+                }
+                None => {
+                    ui.label(paint::muted("Not logged in.", &theme));
+                }
+            }
+            ui.horizontal(|ui| {
+                if ui.button("Open account").clicked() {
+                    self.go(super::Screen::Account);
+                }
+                ui.label("Supabase anon key");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.cloud.anon_key)
+                        .password(true)
+                        .hint_text("Project Settings → API")
+                        .desired_width(260.0),
+                );
+                if ui.button("Save key").clicked() {
+                    let key = self.cloud.anon_key.trim().to_string();
+                    if key.len() < 20 {
+                        self.error = Some("That key looks too short.".into());
+                    } else if self.check(self.db.set_cloud_anon_key(&key)).is_some() {
+                        self.status = "Supabase key saved.".into();
+                    }
+                }
+            });
+            ui.label(paint::muted(
+                format!("Accounts, friends and shared libraries are stored in {}.", gamelib::cloud::DEFAULT_URL),
+                &theme,
+            ));
+            ui.add_space(10.0);
             ui.label(paint::strong("Discord", 17.0));
             let mut presence = self
                 .db

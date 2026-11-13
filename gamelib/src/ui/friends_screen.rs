@@ -22,6 +22,8 @@ pub struct FriendGamesNow {
 
 #[derive(Default)]
 pub struct FriendsState {
+    /// Showing Steam friends (rather than GameLib friends).
+    pub steam_tab: bool,
     pub search: String,
     /// The friend whose whole game list is open.
     pub open: Option<String>,
@@ -77,13 +79,32 @@ impl GameLibApp {
 
     pub fn friends_screen(&mut self, ui: &mut egui::Ui) {
         let theme = self.theme;
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Friends").font(bold(32.0)));
+            ui.add_space(12.0);
+            if paint::chip(ui, &theme, "GameLib friends", !self.friends.steam_tab).clicked() {
+                self.friends.steam_tab = false;
+            }
+            if paint::chip(ui, &theme, "Steam friends", self.friends.steam_tab).clicked() {
+                self.friends.steam_tab = true;
+            }
+        });
+        ui.add_space(10.0);
+        if !self.friends.steam_tab {
+            self.gamelib_friends(ui);
+            return;
+        }
+        self.steam_friends(ui);
+    }
+
+    fn steam_friends(&mut self, ui: &mut egui::Ui) {
+        let theme = self.theme;
         let time = ui.input(|i| i.time);
         let lists = self.friend_games_now(time);
         let friends = self.data.friends.clone();
         let library = self.data.visible.clone();
 
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Friends").font(bold(32.0)));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .button("Refresh their games")

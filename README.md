@@ -192,6 +192,51 @@ update; use **Settings → Download missing covers** to try again any time.
   rare each one is); for any game you can write your own checklist on its
   page and tick it off.
 
+### GameLib accounts and friends
+
+Make a GameLib account, add friends by their username, and see their
+libraries and stats on the **Friends** page (the **GameLib friends** tab).
+Accounts are stored in the project's Supabase database
+(`https://ynjmutmaslrabyeucvzk.supabase.co`).
+
+**One-time setup in Supabase** (whoever owns the project does this once):
+
+1. Open the project at <https://supabase.com/dashboard>, go to **SQL Editor**
+   → **New query**, paste the whole of `supabase/schema.sql` from this
+   repository, and press **Run**. This makes the tables (profiles, friend
+   requests, shared libraries, stats) and the security rules that keep a
+   library visible only to its owner and their accepted friends.
+2. Go to **Project Settings** → **API** and copy the **anon public** key
+   (or the newer **publishable** key).
+3. Optional: under **Authentication** → **Sign In / Providers** → Email,
+   switch off **Confirm email** if you don't want new accounts to need to
+   click an email link before logging in.
+
+**In GameLib:** paste the anon key into **Settings → GameLib account** (or
+on the Friends page, which asks for it). Then **Create an account**
+(username, email and password) or **Log in**. To build the key in so
+nobody has to paste it, set `GAMELIB_SUPABASE_ANON_KEY` when building:
+
+```powershell
+$env:GAMELIB_SUPABASE_ANON_KEY = "your anon key"
+```
+
+```powershell
+cargo run
+```
+
+Once logged in:
+
+- **Add friend**: type their GameLib username. They see your request under
+  **Friend requests** and accept it. (If they'd already asked you, adding
+  them accepts straight away.)
+- **View library**: their games (playtime, status, rating, favourites, with
+  the ones you both have marked) and their stats.
+- Your own library and stats are shared with your friends when you log in
+  and after every play session. Untick **Share my library and stats** on
+  the **Account** page (Ctrl+K → "account") to stop, which also deletes
+  what was shared. Hidden games are never shared.
+
 ### Discord
 
 Under **Settings → Discord**:
