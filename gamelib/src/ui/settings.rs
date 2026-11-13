@@ -8,7 +8,7 @@ use gamelib::shop::{self, ItemKind};
 use gamelib::worker::Job;
 
 use super::theme::{bold, source_name};
-use super::{ANIMATE_KEY, COUCH_KEY, GameLibApp, paint};
+use super::{ANIMATE_KEY, COUCH_KEY, GameLibApp, SPLASH_KEY, paint};
 
 impl GameLibApp {
     pub fn settings_screen(&mut self, ui: &mut egui::Ui) {
@@ -197,6 +197,13 @@ impl GameLibApp {
                 self.animate = animate;
                 self.check(self.db.set_bool_setting(ANIMATE_KEY, animate));
             }
+            let mut splash = self.db.get_bool_setting(SPLASH_KEY, true).unwrap_or(true);
+            if ui
+                .checkbox(&mut splash, "Loading animation on startup")
+                .changed()
+            {
+                self.check(self.db.set_bool_setting(SPLASH_KEY, splash));
+            }
         });
         ui.add_space(14.0);
 
@@ -239,6 +246,19 @@ impl GameLibApp {
                     }
                 }
             });
+        });
+        ui.add_space(14.0);
+
+        theme.panel_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(paint::strong("Admin panel", 17.0));
+            ui.label(paint::muted(
+                "Give Stardust and set any picture as the background. Locked with the password in admin_password.txt in GameLib's data folder (shortcut: Ctrl+Shift+A).",
+                &theme,
+            ));
+            if ui.button("Open admin panel").clicked() {
+                self.go(super::Screen::Admin);
+            }
         });
         ui.add_space(14.0);
 

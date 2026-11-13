@@ -22,6 +22,7 @@
 //! - [`worker`]   the background thread the UI talks to through channels
 
 pub mod achievements;
+pub mod admin;
 pub mod artwork;
 pub mod assistant;
 pub mod backlog;

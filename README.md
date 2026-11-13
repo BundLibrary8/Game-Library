@@ -113,6 +113,30 @@ Franchises, Stats, Shop and Settings. The TV icon at the bottom opens
 - **Settings → Sync between PCs**: pick a folder that OneDrive, Dropbox or
   Google Drive syncs, and your library follows you between PCs.
 
+### Admin panel
+
+**Settings → Admin panel** (or **Ctrl+Shift+A**) opens a password-protected
+panel where you can:
+
+- give Stardust (or take it away), and
+- use any picture (PNG, JPEG or WebP) as the background behind every
+  screen.
+
+The password is kept in its own text file, `admin_password.txt`, in
+GameLib's data folder:
+
+```
+%APPDATA%\gamelib\admin_password.txt
+```
+
+It's created the first time you try to unlock the panel, with the password
+`admin`. Open it in Notepad, replace `admin` with your own password and save.
+Lines starting with `#` are ignored. This keeps casual hands off the panel,
+but anyone who can open the file can read the password.
+
+GameLib shows a short loading animation when it starts. Untick **Settings →
+Loading animation on startup** to skip it.
+
 ### Couch Mode
 
 A full-screen view for playing on a TV with a controller. Open it with the
