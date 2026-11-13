@@ -26,3 +26,9 @@ tempfile = "3.27.0"
 
 [target."cfg(windows)".dependencies]
 winreg = "0.56.0"
+
+# Build the libraries GameLib uses with optimisation even in a normal
+# `cargo run`. Our own code still compiles quickly, but image work and
+# drawing run many times faster. (The first build takes a little longer.)
+[profile.dev.package."*"]
+opt-level = 2

@@ -482,31 +482,53 @@ impl WorkerState {
         Ok(covers)
     }
 
-    /// Download one game's cover: Steam's public image server first for
-    /// Steam games (no key needed), then SteamGridDB if a key is set.
+    /// Download one game's cover, trying each place it might be:
+    /// 1. Steam's public image servers (Steam games; no key needed)
+    /// 2. SteamGridDB (any game; needs the key from Settings)
+    /// 3. the game's wide Steam Store banner, made into a cover
+    ///
+    /// A miss at one step just moves on to the next.
     fn download_cover_for(
         &self,
         client: &reqwest::blocking::Client,
         api_key: Option<&str>,
         game: &Game,
     ) -> Result<Option<PathBuf>> {
+        let covers_dir = &self.config.covers_dir;
         if game.source == Source::Steam {
-            let url = artwork::steam_cdn_cover_url(&game.source_id);
-            // Not every game has a cover there; a miss just moves on.
-            match metadata::download_cover(client, &url, &self.config.covers_dir, game.id) {
-                Ok(path) => return Ok(Some(path)),
-                Err(err) => log::info!("no Steam cover for {}: {err:#}", game.title),
+            for url in artwork::steam_cdn_cover_urls(&game.source_id) {
+                match metadata::download_cover(client, &url, covers_dir, game.id) {
+                    Ok(path) => return Ok(Some(path)),
+                    Err(err) => log::info!("no cover for {} at {url}: {err:#}", game.title),
+                }
             }
         }
-        let Some(api_key) = api_key else {
-            return Ok(None);
-        };
-        match metadata::find_cover_url(client, api_key, game, None)? {
-            Some(url) => {
-                metadata::download_cover(client, &url, &self.config.covers_dir, game.id).map(Some)
+        if let Some(api_key) = api_key {
+            match metadata::find_cover_url(client, api_key, game, None) {
+                Ok(Some(url)) => {
+                    return metadata::download_cover(client, &url, covers_dir, game.id).map(Some);
+                }
+                Ok(None) => {}
+                Err(err) => log::info!("SteamGridDB had nothing for {}: {err:#}", game.title),
             }
-            None => Ok(None),
         }
+        if game.source == Source::Steam
+            && let Some(info) = metadata::fetch_store_info(client, &game.source_id)?
+        {
+            // The store reply also has the description, so keep it.
+            if game.description.is_none() {
+                self.db.set_game_info(
+                    game.id,
+                    info.description.as_deref(),
+                    &info.genres,
+                    info.release_year,
+                )?;
+            }
+            if let Some(url) = info.header_image {
+                return metadata::download_cover(client, &url, covers_dir, game.id).map(Some);
+            }
+        }
+        Ok(None)
     }
 
     fn fetch_missing_covers(&self) -> Result<()> {

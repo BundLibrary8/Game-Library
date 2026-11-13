@@ -5,6 +5,7 @@
       "type": "game",
       "name": "Dota 2",
       "steam_appid": 570,
+      "header_image": "https://cdn.akamai.steamstatic.com/steam/apps/570/header.jpg",
       "short_description": "Every day, millions of players worldwide enter battle as one of over a hundred Dota heroes.",
       "genres": [
         { "id": "1", "description": "Action" },
