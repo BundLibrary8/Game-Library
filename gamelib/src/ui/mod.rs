@@ -28,8 +28,10 @@ mod paint;
 mod profile;
 mod settings;
 mod shop;
+mod smart;
 mod stats;
 mod theme;
+mod wrapped;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -61,6 +63,11 @@ const COUCH_KEY: &str = "ui.start_couch";
 /// Setting: "0" to stop the backgrounds moving.
 const ANIMATE_KEY: &str = "ui.animate";
 
+/// This computer's offset from UTC, in seconds, for showing times locally.
+pub fn local_offset() -> i32 {
+    chrono::Local::now().offset().local_minus_utc()
+}
+
 /// Which screen fills the middle of the window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
@@ -72,6 +79,8 @@ pub enum Screen {
     Discover,
     /// Ask questions about the library.
     Assistant,
+    /// GameLib Wrapped: a look back at one year.
+    Wrapped(i32),
     Franchises,
     Stats,
     Profile,
@@ -88,6 +97,7 @@ impl Screen {
             "assistant" => Screen::Assistant,
             "franchises" => Screen::Franchises,
             "stats" => Screen::Stats,
+            "wrapped" => Screen::Wrapped(gamelib::patterns::year_of(now(), local_offset())),
             "profile" => Screen::Profile,
             "shop" => Screen::Shop,
             "settings" => Screen::Settings,
@@ -106,6 +116,8 @@ pub enum Filter {
     Hidden,
     Tag(i64),
     Source(Source),
+    /// A smart collection, by its place in the saved list.
+    Smart(usize),
 }
 
 /// Everything loaded from the database for drawing. Screens read from
@@ -141,6 +153,15 @@ pub struct Data {
     pub taste_tags: HashMap<i64, Vec<String>>,
     /// How you tend to play.
     pub habits: Habits,
+    /// Saved smart collections.
+    pub smart: Vec<gamelib::smart::SmartCollection>,
+    /// Every finished play session.
+    pub sessions: Vec<gamelib::patterns::SessionRow>,
+    /// When and how you play, over all sessions.
+    pub patterns: gamelib::patterns::Patterns,
+    pub achievements: Vec<gamelib::achievements::Achievement>,
+    /// Each game's tags and collections.
+    pub all_tags: HashMap<i64, Vec<String>>,
 }
 
 impl Data {
@@ -158,6 +179,7 @@ impl Data {
             Filter::Hidden => query.include_hidden = true,
             Filter::Tag(tag_id) => query.tag_id = Some(tag_id),
             Filter::Source(source) => query.source = Some(source),
+            Filter::Smart(_) => {} // applied below, once extras are loaded
         }
         let mut games = db.query_games(&query)?;
         match filter {
@@ -183,19 +205,44 @@ impl Data {
             .filter(|(tag, _)| tag.is_collection)
             .map(|(tag, _)| tag.name.as_str())
             .collect();
-        let mut taste_tags = db.all_game_tags()?;
+        let all_tags = db.all_game_tags()?;
+        let smart = db.smart_collections()?;
+        if let Filter::Smart(index) = filter {
+            match smart.get(index) {
+                Some(collection) => {
+                    let none = Vec::new();
+                    games.retain(|g| {
+                        let e = extras.get(&g.id).cloned().unwrap_or_default();
+                        collection
+                            .rules
+                            .matches(g, &e, all_tags.get(&g.id).unwrap_or(&none), now())
+                    });
+                }
+                None => games.clear(),
+            }
+        }
+        let mut taste_tags = all_tags.clone();
         for names in taste_tags.values_mut() {
             names.retain(|name| !collections.contains(name.as_str()));
         }
         let taste = insights::recommend(&visible, &extras, &taste_tags, usize::MAX);
         let recommendations = taste.iter().take(12).cloned().collect();
-        let habits = gamelib::backlog::habits(&db.session_rows(0)?, now());
+        let sessions = db.session_rows(i64::MIN)?;
+        let habits = gamelib::backlog::habits(&sessions, now());
+        let patterns = gamelib::patterns::patterns(&sessions, now(), local_offset());
+        let achievements =
+            gamelib::achievements::achievements(&visible, &extras, &sessions, &patterns);
         Ok(Data {
             extras,
             recommendations,
             taste,
             taste_tags,
             habits,
+            smart,
+            all_tags,
+            sessions,
+            patterns,
+            achievements,
             visible,
             games,
             hidden_count,
@@ -348,6 +395,16 @@ impl GameLibApp {
         db.refresh_exe_installed()?;
         db.grant_free_items(now())?;
         db.grant_earned_items(now())?;
+        // Load anything your other PCs saved to the sync folder.
+        match db.sync_pull(now()) {
+            Ok(Some(summary)) => log::info!(
+                "sync: loaded {} new and {} updated games",
+                summary.added,
+                summary.updated
+            ),
+            Ok(None) => {}
+            Err(err) => log::warn!("couldn't load from the sync folder: {err:#}"),
+        }
 
         // GAMELIB_THEME=constellation (or aurora, synthwave, ember) shows a
         // look without owning it. For trying things out.
@@ -454,6 +511,17 @@ impl GameLibApp {
     }
 
     /// Show the library narrowed to a filter.
+    /// Delete a saved smart collection.
+    fn delete_smart(&mut self, index: usize) {
+        let mut list = self.data.smart.clone();
+        if index < list.len() {
+            list.remove(index);
+            if self.check(self.db.set_smart_collections(&list)).is_some() {
+                self.show_filter(Filter::All);
+            }
+        }
+    }
+
     fn show_filter(&mut self, filter: Filter) {
         self.filter = filter;
         self.screen = Screen::Library;
@@ -728,7 +796,8 @@ impl GameLibApp {
                 (Screen::Settings, Icon::Settings, "Settings"),
             ] {
                 let selected = self.screen == screen
-                    || (screen == Screen::Library && matches!(self.screen, Screen::Details(_)));
+                    || (screen == Screen::Library && matches!(self.screen, Screen::Details(_)))
+                    || (screen == Screen::Stats && matches!(self.screen, Screen::Wrapped(_)));
                 let (rect, response) = ui.allocate_exact_size(vec2(50.0, 50.0), Sense::click());
                 if selected {
                     ui.painter().rect_filled(rect, 14.0, theme.panel_alt);
@@ -829,6 +898,13 @@ impl GameLibApp {
 }
 
 impl eframe::App for GameLibApp {
+    /// Save the library to the sync folder (if one is set) on the way out.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if let Err(err) = self.db.sync_push(now()) {
+            log::warn!("couldn't save to the sync folder: {err:#}");
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_worker_results(&ctx);
@@ -933,6 +1009,7 @@ impl eframe::App for GameLibApp {
                                     Screen::Details(game_id) => self.details_screen(ui, game_id),
                                     Screen::Discover => self.discover_screen(ui),
                                     Screen::Assistant => self.assistant_screen(ui),
+                                    Screen::Wrapped(year) => self.wrapped_screen(ui, year),
                                     Screen::Franchises => self.franchises_screen(ui),
                                     Screen::Stats => self.stats_screen(ui),
                                     Screen::Profile => self.profile_screen(ui),

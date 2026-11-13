@@ -80,6 +80,14 @@ cargo fmt
 | `artwork.rs` | Covers from Steam's cache and icons read out of exes, no key needed |
 | `metadata.rs` | Covers from SteamGridDB, info from the Steam Store |
 | `stats.rs` | Totals, most played, playtime per day |
+| `extras.rs` | Status, rating, franchise, hours to beat, notes, review, process name |
+| `backlog.rs` | Backlog Intelligence: summary, game lengths, habits, what to play tonight, neglected, complete next, similar games |
+| `assistant.rs` | The assistant: built-in answers from the library, and the Claude API call |
+| `smart.rs` | Smart collections: saved rules that pick games |
+| `patterns.rs` | When you play (hour, weekday, month, streaks) and GameLib Wrapped |
+| `achievements.rs` | GameLib's own achievements, worked out from the library |
+| `insights.rs` | Franchises and recommendations |
+| `backup.rs` | Save backups, mods, export/import, and sync through a cloud folder |
 | `profile.rs` | Name, bio, banner, badges, showcase, earned banners |
 | `friends.rs` | Read-only Steam friends list, with a cache |
 | `shop.rs` | Stardust ledger, rewards, catalogue, buying and equipping |
@@ -126,3 +134,7 @@ Never checked against the real thing:
 - The file-picker dialogs
 - SteamGridDB, Steam Store and Steam Web API calls (the parsers are tested
   against sample responses; the live endpoints were never called)
+- The Claude API call for the assistant (the request is built and the
+  reply parsed in tests; no real key was used)
+- Syncing through a real OneDrive/Dropbox folder (tested with two
+  libraries and a local folder)

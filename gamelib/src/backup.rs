@@ -387,6 +387,94 @@ pub fn read_export(file: &Path) -> Result<LibraryExport> {
     serde_json::from_str(&json).context("that file isn't a GameLib library export")
 }
 
+// --- Sync through a cloud folder ---------------------------------------------
+
+/// The file GameLib keeps in the sync folder.
+pub const SYNC_FILE: &str = "gamelib-sync.json";
+const SYNC_FOLDER_KEY: &str = "sync.folder";
+/// The `exported_at` of the newest sync file this PC has seen (written or
+/// loaded), so the same file isn't loaded twice.
+const SYNC_SEEN_KEY: &str = "sync.seen";
+
+/// What a sync did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SyncReport {
+    /// Changes loaded from the folder (another PC saved newer ones).
+    pub pulled: Option<ImportSummary>,
+    /// This library was saved to the folder.
+    pub pushed: bool,
+}
+
+impl Db {
+    /// The folder used for sync: one that OneDrive, Dropbox, Google Drive
+    /// or similar keeps the same on every PC.
+    pub fn sync_folder(&self) -> Result<Option<PathBuf>> {
+        Ok(self
+            .get_setting(SYNC_FOLDER_KEY)?
+            .filter(|path| !path.trim().is_empty())
+            .map(PathBuf::from))
+    }
+
+    pub fn set_sync_folder(&self, folder: Option<&Path>) -> Result<()> {
+        match folder {
+            Some(folder) => self.set_setting(SYNC_FOLDER_KEY, &folder.to_string_lossy()),
+            None => self.delete_setting(SYNC_FOLDER_KEY),
+        }
+    }
+
+    /// Load the sync file if another PC has saved a newer one since this
+    /// PC last looked. Playtime only ever goes up; other details take the
+    /// other PC's values.
+    pub fn sync_pull(&self, now: i64) -> Result<Option<ImportSummary>> {
+        let Some(folder) = self.sync_folder()? else {
+            return Ok(None);
+        };
+        let file = folder.join(SYNC_FILE);
+        if !file.exists() {
+            return Ok(None);
+        }
+        let export = read_export(&file)?;
+        let seen: i64 = self
+            .get_setting(SYNC_SEEN_KEY)?
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(i64::MIN);
+        if export.exported_at <= seen {
+            return Ok(None);
+        }
+        let summary = self.import_library(&export, now)?;
+        self.set_setting(SYNC_SEEN_KEY, &export.exported_at.to_string())?;
+        Ok(Some(summary))
+    }
+
+    /// Save this library to the sync folder.
+    pub fn sync_push(&self, now: i64) -> Result<bool> {
+        let Some(folder) = self.sync_folder()? else {
+            return Ok(false);
+        };
+        anyhow::ensure!(
+            folder.is_dir(),
+            "the sync folder {} isn't there",
+            folder.display()
+        );
+        let export = self.export_library(now)?;
+        // Write next to it, then swap, so a half-written file is never
+        // picked up by the cloud app.
+        let temp = folder.join(format!("{SYNC_FILE}.tmp"));
+        write_export(&export, &temp)?;
+        std::fs::rename(&temp, folder.join(SYNC_FILE))
+            .with_context(|| format!("couldn't save to {}", folder.display()))?;
+        self.set_setting(SYNC_SEEN_KEY, &export.exported_at.to_string())?;
+        Ok(true)
+    }
+
+    /// Load anything newer from the folder, then save the result back.
+    pub fn sync_now(&self, now: i64) -> Result<SyncReport> {
+        let pulled = self.sync_pull(now)?;
+        let pushed = self.sync_push(now)?;
+        Ok(SyncReport { pulled, pushed })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -579,5 +667,35 @@ mod tests {
         export.games[1].source = "playstation".into();
         assert!(empty.import_library(&export, 2).is_err());
         assert!(empty.list_games().unwrap().is_empty());
+    }
+
+    #[test]
+    fn two_pcs_sync_through_a_folder() {
+        let cloud = tempfile::tempdir().unwrap();
+        let pc1 = Db::open_in_memory().unwrap();
+        let pc2 = Db::open_in_memory().unwrap();
+        for db in [&pc1, &pc2] {
+            db.set_sync_folder(Some(cloud.path())).unwrap();
+        }
+        let id = pc1
+            .upsert_detected(&DetectedGame::manual("Ember Road", "/g/ember.exe"), 1)
+            .unwrap()
+            .game_id;
+        pc1.set_notes(id, Some("chapter 3")).unwrap();
+        assert!(pc1.sync_now(100).unwrap().pushed);
+
+        // The second PC picks it up once, not again.
+        let report = pc2.sync_now(200).unwrap();
+        assert_eq!(report.pulled.map(|s| s.added), Some(1));
+        let game = &pc2.list_games().unwrap()[0];
+        assert_eq!(
+            pc2.extras(game.id).unwrap().notes.as_deref(),
+            Some("chapter 3")
+        );
+        assert_eq!(pc2.sync_pull(300).unwrap(), None);
+
+        // Nothing set up: nothing happens.
+        let alone = Db::open_in_memory().unwrap();
+        assert_eq!(alone.sync_now(1).unwrap(), SyncReport::default());
     }
 }

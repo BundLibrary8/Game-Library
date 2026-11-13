@@ -21,6 +21,7 @@
 //! - [`backup`]   save-game backups, mod lists, and library export/import
 //! - [`worker`]   the background thread the UI talks to through channels
 
+pub mod achievements;
 pub mod artwork;
 pub mod assistant;
 pub mod backlog;
@@ -34,9 +35,11 @@ pub mod launcher;
 pub mod metadata;
 pub mod model;
 pub mod paths;
+pub mod patterns;
 pub mod playtime;
 pub mod profile;
 pub mod shop;
+pub mod smart;
 pub mod sources;
 pub mod stats;
 pub mod worker;

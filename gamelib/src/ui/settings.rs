@@ -244,6 +244,56 @@ impl GameLibApp {
 
         theme.panel_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
+            ui.label(paint::strong("Sync between PCs", 17.0));
+            ui.label(paint::muted(
+                "Pick a folder that OneDrive, Dropbox, Google Drive or iCloud keeps in step on all your PCs. \
+                 GameLib saves your library there when it closes and loads changes from your other PCs when it starts. \
+                 Playtime only ever goes up; for everything else, the PC that saved last wins.",
+                &theme,
+            ));
+            let folder = self.db.sync_folder().ok().flatten();
+            ui.horizontal(|ui| {
+                match &folder {
+                    Some(folder) => {
+                        ui.label(paint::strong(folder.display().to_string(), 14.0));
+                    }
+                    None => {
+                        ui.label(paint::muted("No sync folder set.", &theme));
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Choose folder…").clicked()
+                    && let Some(chosen) = rfd::FileDialog::new()
+                        .set_title("Choose a folder your cloud storage syncs")
+                        .pick_folder()
+                {
+                    let set = self
+                        .db
+                        .set_sync_folder(Some(&chosen))
+                        .and_then(|()| self.db.sync_now(gamelib::now()));
+                    if let Some(report) = self.check(set) {
+                        self.status = sync_message(&report);
+                        self.dirty = true;
+                    }
+                }
+                if folder.is_some() {
+                    if ui.button("Sync now").clicked()
+                        && let Some(report) = self.check(self.db.sync_now(gamelib::now()))
+                    {
+                        self.status = sync_message(&report);
+                        self.dirty = true;
+                    }
+                    if ui.button("Stop syncing").clicked() {
+                        self.check(self.db.set_sync_folder(None));
+                    }
+                }
+            });
+        });
+        ui.add_space(14.0);
+
+        theme.panel_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
             ui.label(paint::strong("This PC", 17.0));
             match self.pc_specs() {
                 Some(specs) => {
@@ -292,5 +342,17 @@ impl GameLibApp {
                 &theme,
             ));
         }
+    }
+}
+
+/// What a sync did, for the status bar.
+fn sync_message(report: &gamelib::backup::SyncReport) -> String {
+    match report.pulled {
+        Some(summary) => format!(
+            "Synced: loaded {} new and {} updated games from your other PCs.",
+            summary.added, summary.updated
+        ),
+        None if report.pushed => "Synced: your library is saved to the sync folder.".to_string(),
+        None => "Nothing to sync.".to_string(),
     }
 }
