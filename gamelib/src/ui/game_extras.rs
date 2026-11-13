@@ -62,7 +62,147 @@ fn star_rating(ui: &mut egui::Ui, theme: &Theme, rating: Option<u8>) -> Option<O
     chosen
 }
 
+/// The text being typed into a game's "Your notes" panel.
+pub struct NotesDraft {
+    pub game_id: i64,
+    pub hours: String,
+    pub notes: String,
+    pub review: String,
+    pub process: String,
+}
+
+impl NotesDraft {
+    fn of(game_id: i64, extras: &GameExtras) -> NotesDraft {
+        NotesDraft {
+            game_id,
+            hours: extras
+                .minutes_to_beat
+                .map(|m| {
+                    let hours = m as f32 / 60.0;
+                    if m.is_multiple_of(60) {
+                        format!("{hours:.0}")
+                    } else {
+                        format!("{hours:.1}")
+                    }
+                })
+                .unwrap_or_default(),
+            notes: extras.notes.clone().unwrap_or_default(),
+            review: extras.review.clone().unwrap_or_default(),
+            process: extras.process_name.clone().unwrap_or_default(),
+        }
+    }
+}
+
 impl GameLibApp {
+    /// Your notes and review, how long the game takes to beat, and which
+    /// process to watch for when tracking playtime.
+    pub fn notes_panel(&mut self, ui: &mut egui::Ui, game: &Game, extras: &GameExtras) {
+        let theme = self.theme;
+        if self.notes_draft.as_ref().map(|d| d.game_id) != Some(game.id) {
+            self.notes_draft = Some(NotesDraft::of(game.id, extras));
+        }
+        let length = gamelib::backlog::length(game, extras);
+        let mut save = false;
+        paint::panel(ui, theme.panel_frame().inner_margin(24.0), |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(paint::strong("Your notes and review", 16.0));
+            let Some(draft) = self.notes_draft.as_mut() else {
+                return;
+            };
+            ui.add_space(6.0);
+            egui::Grid::new("notes_grid")
+                .num_columns(2)
+                .spacing([14.0, 10.0])
+                .show(ui, |ui| {
+                    ui.label("Hours to beat");
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut draft.hours)
+                                .hint_text(format!("{:.0}", length.minutes as f32 / 60.0))
+                                .desired_width(70.0),
+                        );
+                        ui.label(paint::muted(
+                            if length.guessed {
+                                "Blank uses a guess from the genre. HowLongToBeat.com is a good place to look it up."
+                            } else {
+                                "Used by Discover and the Assistant."
+                            },
+                            &theme,
+                        ));
+                    });
+                    ui.end_row();
+                    ui.label("Game process")
+                        .on_hover_text("For games whose exe runs from somewhere other than the install folder");
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut draft.process)
+                                .hint_text("e.g. eldenring.exe")
+                                .desired_width(200.0),
+                        );
+                        ui.label(paint::muted(
+                            "Playtime also counts while an exe with this name is running.",
+                            &theme,
+                        ));
+                    });
+                    ui.end_row();
+                });
+            ui.add_space(8.0);
+            ui.label(paint::caps("Notes", 11.5, theme.muted));
+            ui.add(
+                egui::TextEdit::multiline(&mut draft.notes)
+                    .hint_text("Where you got to, tips, codes, anything to remember")
+                    .desired_rows(3)
+                    .desired_width(f32::INFINITY),
+            );
+            ui.add_space(6.0);
+            ui.label(paint::caps("Review", 11.5, theme.muted));
+            ui.add(
+                egui::TextEdit::multiline(&mut draft.review)
+                    .hint_text("What did you think of it?")
+                    .desired_rows(3)
+                    .desired_width(f32::INFINITY),
+            );
+            ui.add_space(8.0);
+            let changed = {
+                let saved = NotesDraft::of(game.id, extras);
+                saved.hours != draft.hours
+                    || saved.notes != draft.notes
+                    || saved.review != draft.review
+                    || saved.process != draft.process
+            };
+            ui.add_enabled_ui(changed, |ui| {
+                if paint::accent_button(ui, &theme, "Save notes", 14.0, vec2(20.0, 9.0)).clicked() {
+                    save = true;
+                }
+            });
+        });
+        if save && let Some(draft) = &self.notes_draft {
+            let hours = draft.hours.trim().replace(',', ".");
+            let minutes = if hours.is_empty() {
+                Ok(None)
+            } else {
+                hours
+                    .parse::<f32>()
+                    .ok()
+                    .filter(|h| h.is_finite() && *h > 0.0 && *h < 10_000.0)
+                    .map(|h| Some((h * 60.0).round() as u32))
+                    .ok_or_else(|| anyhow::anyhow!("\"{hours}\" isn't a number of hours"))
+            };
+            let result = minutes.and_then(|minutes| {
+                self.db.set_minutes_to_beat(game.id, minutes)?;
+                self.db.set_notes(game.id, Some(&draft.notes))?;
+                self.db.set_review(game.id, Some(&draft.review))?;
+                self.db.set_process_name(game.id, Some(&draft.process))?;
+                Ok(())
+            });
+            if self.check(result).is_some() {
+                self.status = "Notes saved.".to_string();
+                self.notes_draft = None;
+                self.dirty = true;
+            }
+        }
+    }
+
     /// The row under the Launch button: where you are with the game, and
     /// what you'd give it out of five.
     pub fn status_and_rating(&mut self, ui: &mut egui::Ui, game: &Game, extras: &GameExtras) {

@@ -8,7 +8,7 @@ use gamelib::shop::{self, ItemKind};
 use gamelib::worker::Job;
 
 use super::theme::{bold, source_name};
-use super::{ANIMATE_KEY, GameLibApp, paint};
+use super::{ANIMATE_KEY, COUCH_KEY, GameLibApp, paint};
 
 impl GameLibApp {
     pub fn settings_screen(&mut self, ui: &mut egui::Ui) {
@@ -113,13 +113,36 @@ impl GameLibApp {
                         .desired_width(340.0),
                 );
                 ui.end_row();
+                ui.label("Anthropic (assistant)");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.settings.anthropic_key)
+                        .password(true)
+                        .hint_text("Optional: lets the Assistant ask Claude")
+                        .desired_width(340.0),
+                );
+                ui.end_row();
             });
+            let mut use_claude = self
+                .db
+                .get_bool_setting(keys::ASSISTANT_USE_CLAUDE, true)
+                .unwrap_or(true);
+            if ui
+                .checkbox(
+                    &mut use_claude,
+                    "Let the Assistant ask Claude (sends a summary of your library: titles, hours, status, ratings and genres)",
+                )
+                .changed()
+            {
+                let saved = self.db.set_bool_setting(keys::ASSISTANT_USE_CLAUDE, use_claude);
+                self.check(saved);
+            }
             ui.horizontal(|ui| {
                 if ui.button("Save keys").clicked() {
                     let saved = self
                         .db
                         .set_setting(keys::STEAMGRIDDB_KEY, self.settings.steamgriddb_key.trim())
-                        .and_then(|()| self.db.set_setting(keys::STEAM_API_KEY, self.settings.steam_key.trim()));
+                        .and_then(|()| self.db.set_setting(keys::STEAM_API_KEY, self.settings.steam_key.trim()))
+                        .and_then(|()| self.db.set_setting(keys::ANTHROPIC_KEY, self.settings.anthropic_key.trim()));
                     if self.check(saved).is_some() {
                         self.status = "Keys saved.".to_string();
                     }
@@ -154,6 +177,14 @@ impl GameLibApp {
             });
             if let Some(choice) = choice {
                 self.check(self.db.equip_library_background(Some(choice)));
+            }
+            let mut couch = self.db.get_bool_setting(COUCH_KEY, false).unwrap_or(false);
+            if ui
+                .checkbox(&mut couch, "Open in Couch Mode")
+                .on_hover_text("Start full screen, ready for a TV and controller. Press F11 or Esc to leave it.")
+                .changed()
+            {
+                self.check(self.db.set_bool_setting(COUCH_KEY, couch));
             }
             let mut animate = self.animate;
             if ui
@@ -213,6 +244,56 @@ impl GameLibApp {
 
         theme.panel_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
+            ui.label(paint::strong("Sync between PCs", 17.0));
+            ui.label(paint::muted(
+                "Pick a folder that OneDrive, Dropbox, Google Drive or iCloud keeps in step on all your PCs. \
+                 GameLib saves your library there when it closes and loads changes from your other PCs when it starts. \
+                 Playtime only ever goes up; for everything else, the PC that saved last wins.",
+                &theme,
+            ));
+            let folder = self.db.sync_folder().ok().flatten();
+            ui.horizontal(|ui| {
+                match &folder {
+                    Some(folder) => {
+                        ui.label(paint::strong(folder.display().to_string(), 14.0));
+                    }
+                    None => {
+                        ui.label(paint::muted("No sync folder set.", &theme));
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Choose folder…").clicked()
+                    && let Some(chosen) = rfd::FileDialog::new()
+                        .set_title("Choose a folder your cloud storage syncs")
+                        .pick_folder()
+                {
+                    let set = self
+                        .db
+                        .set_sync_folder(Some(&chosen))
+                        .and_then(|()| self.db.sync_now(gamelib::now()));
+                    if let Some(report) = self.check(set) {
+                        self.status = sync_message(&report);
+                        self.dirty = true;
+                    }
+                }
+                if folder.is_some() {
+                    if ui.button("Sync now").clicked()
+                        && let Some(report) = self.check(self.db.sync_now(gamelib::now()))
+                    {
+                        self.status = sync_message(&report);
+                        self.dirty = true;
+                    }
+                    if ui.button("Stop syncing").clicked() {
+                        self.check(self.db.set_sync_folder(None));
+                    }
+                }
+            });
+        });
+        ui.add_space(14.0);
+
+        theme.panel_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
             ui.label(paint::strong("This PC", 17.0));
             match self.pc_specs() {
                 Some(specs) => {
@@ -261,5 +342,17 @@ impl GameLibApp {
                 &theme,
             ));
         }
+    }
+}
+
+/// What a sync did, for the status bar.
+fn sync_message(report: &gamelib::backup::SyncReport) -> String {
+    match report.pulled {
+        Some(summary) => format!(
+            "Synced: loaded {} new and {} updated games from your other PCs.",
+            summary.added, summary.updated
+        ),
+        None if report.pushed => "Synced: your library is saved to the sync folder.".to_string(),
+        None => "Nothing to sync.".to_string(),
     }
 }

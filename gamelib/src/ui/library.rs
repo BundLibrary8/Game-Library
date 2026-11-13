@@ -5,6 +5,7 @@ use gamelib::db::SortBy;
 use gamelib::model::{Game, Source};
 
 use super::dialogs::Dialog;
+use super::smart::SmartDraft;
 use super::theme::{Theme, bold, regular, semibold, source_name};
 use super::{Filter, GameLibApp, Screen, paint};
 use crate::text::played_label;
@@ -56,94 +57,154 @@ impl GameLibApp {
         // Filter chips on the left, sort on the right.
         let mut chosen: Option<Filter> = None;
         let mut new_collection = false;
+        let mut new_smart = false;
+        let mut edit_smart: Option<usize> = None;
+        let mut add_preset: Option<gamelib::smart::SmartCollection> = None;
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 10.0;
-            let mut chips: Vec<(Filter, String)> = vec![
-                (Filter::All, "All".to_string()),
-                (Filter::Installed, "Installed".to_string()),
-                (Filter::Favourites, "Favourites ★".to_string()),
-            ];
-            chips.extend(
-                self.data
-                    .collections()
-                    .map(|(tag, _)| (Filter::Tag(tag.id), tag.name.clone())),
-            );
-            // A filter picked from "More" that has no chip of its own gets
-            // a chip while it is in use, so you can see what's applied.
-            if !chips.iter().any(|(filter, _)| *filter == self.filter) {
-                let label = match self.filter {
-                    Filter::RecentlyPlayed => "Recently played".to_string(),
-                    Filter::Hidden => "Hidden".to_string(),
-                    Filter::Source(source) => source_name(source).to_string(),
-                    Filter::Tag(id) => self
-                        .data
-                        .tags
-                        .iter()
-                        .find(|(tag, _)| tag.id == id)
-                        .map(|(tag, _)| tag.name.clone())
-                        .unwrap_or_else(|| "Tag".to_string()),
-                    _ => String::new(),
-                };
-                chips.push((self.filter, label));
-            }
-            for (filter, label) in chips {
-                if paint::chip(ui, &theme, &label, self.filter == filter).clicked() {
-                    chosen = Some(filter);
-                }
-            }
-            // Everything else you can filter by, and making a collection.
-            ui.menu_button("More…", |ui| {
-                ui.set_min_width(210.0);
-                let visible = &self.data.visible;
-                let mut row = |ui: &mut egui::Ui, filter: Filter, label: String| {
-                    if ui.selectable_label(self.filter == filter, label).clicked() {
-                        chosen = Some(filter);
-                        ui.close();
-                    }
-                };
-                let recent = visible.iter().filter(|g| g.last_played.is_some()).count();
-                row(
-                    ui,
-                    Filter::RecentlyPlayed,
-                    format!("Recently played ({recent})"),
-                );
-                if self.data.hidden_count > 0 {
-                    row(
-                        ui,
-                        Filter::Hidden,
-                        format!("Hidden ({})", self.data.hidden_count),
+            // The chips wrap onto a second line when there are lots of them,
+            // leaving room for the sort menu on the right.
+            let chips_width = (ui.available_width() - 230.0).max(200.0);
+            ui.allocate_ui(vec2(chips_width, 0.0), |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(10.0, 8.0);
+                    let mut chips: Vec<(Filter, String)> = vec![
+                        (Filter::All, "All".to_string()),
+                        (Filter::Installed, "Installed".to_string()),
+                        (Filter::Favourites, "Favourites ★".to_string()),
+                    ];
+                    chips.extend(
+                        self.data
+                            .collections()
+                            .map(|(tag, _)| (Filter::Tag(tag.id), tag.name.clone())),
                     );
-                }
-                ui.separator();
-                ui.label(paint::caps("Sources", 11.0, theme.muted));
-                for source in Source::ALL {
-                    let count = visible.iter().filter(|g| g.source == source).count();
-                    if count > 0 {
+                    chips.extend(
+                        self.data
+                            .smart
+                            .iter()
+                            .enumerate()
+                            .map(|(i, c)| (Filter::Smart(i), c.name.clone())),
+                    );
+                    // A filter picked from "More" that has no chip of its own gets
+                    // a chip while it is in use, so you can see what's applied.
+                    if !chips.iter().any(|(filter, _)| *filter == self.filter) {
+                        let label = match self.filter {
+                            Filter::RecentlyPlayed => "Recently played".to_string(),
+                            Filter::Hidden => "Hidden".to_string(),
+                            Filter::Source(source) => source_name(source).to_string(),
+                            Filter::Tag(id) => self
+                                .data
+                                .tags
+                                .iter()
+                                .find(|(tag, _)| tag.id == id)
+                                .map(|(tag, _)| tag.name.clone())
+                                .unwrap_or_else(|| "Tag".to_string()),
+                            _ => String::new(),
+                        };
+                        chips.push((self.filter, label));
+                    }
+                    for (filter, label) in chips {
+                        let mut chip = paint::chip(ui, &theme, &label, self.filter == filter);
+                        if let Filter::Smart(i) = filter
+                            && let Some(collection) = self.data.smart.get(i)
+                        {
+                            chip = chip.on_hover_text(format!(
+                                "Smart collection: {}. Right-click to edit.",
+                                collection.rules.describe()
+                            ));
+                            if chip.secondary_clicked() {
+                                edit_smart = Some(i);
+                            }
+                        }
+                        if chip.clicked() {
+                            chosen = Some(filter);
+                        }
+                    }
+                    if let Filter::Smart(i) = self.filter
+                        && ui.button("Edit rules").clicked()
+                    {
+                        edit_smart = Some(i);
+                    }
+                    // Everything else you can filter by, and making a collection.
+                    ui.menu_button("More…", |ui| {
+                        ui.set_min_width(210.0);
+                        let visible = &self.data.visible;
+                        let mut row = |ui: &mut egui::Ui, filter: Filter, label: String| {
+                            if ui.selectable_label(self.filter == filter, label).clicked() {
+                                chosen = Some(filter);
+                                ui.close();
+                            }
+                        };
+                        let recent = visible.iter().filter(|g| g.last_played.is_some()).count();
                         row(
                             ui,
-                            Filter::Source(source),
-                            format!("{} ({count})", source_name(source)),
+                            Filter::RecentlyPlayed,
+                            format!("Recently played ({recent})"),
                         );
-                    }
-                }
-                let tags: Vec<_> = self
-                    .data
-                    .tags
-                    .iter()
-                    .filter(|(t, _)| !t.is_collection)
-                    .collect();
-                if !tags.is_empty() {
-                    ui.separator();
-                    ui.label(paint::caps("Tags", 11.0, theme.muted));
-                    for (tag, count) in tags {
-                        row(ui, Filter::Tag(tag.id), format!("{} ({count})", tag.name));
-                    }
-                }
-                ui.separator();
-                if ui.button("+ New collection…").clicked() {
-                    new_collection = true;
-                    ui.close();
-                }
+                        if self.data.hidden_count > 0 {
+                            row(
+                                ui,
+                                Filter::Hidden,
+                                format!("Hidden ({})", self.data.hidden_count),
+                            );
+                        }
+                        ui.separator();
+                        ui.label(paint::caps("Sources", 11.0, theme.muted));
+                        for source in Source::ALL {
+                            let count = visible.iter().filter(|g| g.source == source).count();
+                            if count > 0 {
+                                row(
+                                    ui,
+                                    Filter::Source(source),
+                                    format!("{} ({count})", source_name(source)),
+                                );
+                            }
+                        }
+                        let tags: Vec<_> = self
+                            .data
+                            .tags
+                            .iter()
+                            .filter(|(t, _)| !t.is_collection)
+                            .collect();
+                        if !tags.is_empty() {
+                            ui.separator();
+                            ui.label(paint::caps("Tags", 11.0, theme.muted));
+                            for (tag, count) in tags {
+                                row(ui, Filter::Tag(tag.id), format!("{} ({count})", tag.name));
+                            }
+                        }
+                        ui.separator();
+                        if ui.button("+ New collection…").clicked() {
+                            new_collection = true;
+                            ui.close();
+                        }
+                        if ui
+                            .button("+ New smart collection…")
+                            .on_hover_text("A saved filter, like \"short games I haven't played\"")
+                            .clicked()
+                        {
+                            new_smart = true;
+                            ui.close();
+                        }
+                        let presets: Vec<_> = gamelib::smart::presets()
+                            .into_iter()
+                            .filter(|p| !self.data.smart.iter().any(|s| s.name == p.name))
+                            .collect();
+                        if !presets.is_empty() {
+                            ui.menu_button("Add a ready-made one", |ui| {
+                                for preset in presets {
+                                    if ui
+                                        .button(&preset.name)
+                                        .on_hover_text(preset.rules.describe())
+                                        .clicked()
+                                    {
+                                        add_preset = Some(preset);
+                                        ui.close();
+                                    }
+                                }
+                            });
+                        }
+                    });
+                });
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let before = self.sort;
@@ -164,6 +225,21 @@ impl GameLibApp {
         });
         if let Some(filter) = chosen {
             self.show_filter(filter);
+        }
+        if new_smart {
+            self.dialog = Dialog::Smart(Box::new(SmartDraft::new()));
+        }
+        if let Some(index) = edit_smart
+            && let Some(collection) = self.data.smart.get(index)
+        {
+            self.dialog = Dialog::Smart(Box::new(SmartDraft::from(Some(index), collection)));
+        }
+        if let Some(preset) = add_preset {
+            let mut list = self.data.smart.clone();
+            list.push(preset);
+            if self.check(self.db.set_smart_collections(&list)).is_some() {
+                self.show_filter(Filter::Smart(list.len() - 1));
+            }
         }
         if new_collection {
             self.dialog = Dialog::NewCollection {

@@ -188,6 +188,8 @@ impl GameLibApp {
             });
         });
         ui.add_space(18.0);
+        self.notes_panel(ui, &game, &extras);
+        ui.add_space(14.0);
         self.requirements_panel(ui, &game, &extras);
         ui.add_space(18.0);
         self.saves_and_mods_panel(ui, &game, &extras);

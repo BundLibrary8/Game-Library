@@ -121,6 +121,25 @@ impl Db {
         Ok(totals)
     }
 
+    /// Every finished session since `since`, as `(game_id, started_at,
+    /// duration_secs)`, oldest first.
+    pub fn session_rows(&self, since: i64) -> Result<Vec<(i64, i64, u64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT game_id, started_at, duration_secs FROM play_sessions
+             WHERE closed = 1 AND started_at >= ?1 ORDER BY started_at",
+        )?;
+        let rows = stmt
+            .query_map([since], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get::<_, i64>(2)?.max(0) as u64,
+                ))
+            })?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
     /// How many finished play sessions a game has had.
     pub fn session_count(&self, game_id: i64) -> Result<u64> {
         let count: i64 = self.conn.query_row(

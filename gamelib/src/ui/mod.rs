@@ -9,12 +9,17 @@
 //!   worker, and the frame around every screen (icon rail, status bar).
 //! - `theme.rs`: colours and fonts for each look.
 //! - `paint.rs`: drawing helpers (gradients, star map, covers, buttons).
-//! - `home.rs`, `library.rs`, `details.rs`, `franchises.rs`, `stats.rs`,
-//!   `profile.rs`, `shop.rs`, `settings.rs`: one screen each.
+//! - `home.rs`, `library.rs`, `details.rs`, `discover.rs`, `assistant.rs`,
+//!   `franchises.rs`, `stats.rs`, `profile.rs`, `shop.rs`, `settings.rs`:
+//!   one screen each.
 //! - `dialogs.rs`: the pop-up windows.
+//! - `couch.rs`: Couch Mode, the full-screen controller-friendly view.
 
+mod assistant;
+mod couch;
 mod details;
 mod dialogs;
+mod discover;
 mod franchises;
 mod game_extras;
 mod home;
@@ -23,14 +28,17 @@ mod paint;
 mod profile;
 mod settings;
 mod shop;
+mod smart;
 mod stats;
 mod theme;
+mod wrapped;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use anyhow::Result;
 use eframe::egui::{self, Color32, Sense, Stroke, vec2};
+use gamelib::backlog::{Goal, Habits};
 use gamelib::db::{Db, GameQuery, SortBy, keys};
 use gamelib::extras::GameExtras;
 use gamelib::friends::Friend;
@@ -50,8 +58,15 @@ use crate::text::{short_playtime, thousands};
 
 /// How long a shop preview lasts, in seconds.
 const PREVIEW_SECS: f64 = 10.0;
+/// Setting: "1" to open straight into Couch Mode.
+const COUCH_KEY: &str = "ui.start_couch";
 /// Setting: "0" to stop the backgrounds moving.
 const ANIMATE_KEY: &str = "ui.animate";
+
+/// This computer's offset from UTC, in seconds, for showing times locally.
+pub fn local_offset() -> i32 {
+    chrono::Local::now().offset().local_minus_utc()
+}
 
 /// Which screen fills the middle of the window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +75,12 @@ pub enum Screen {
     Library,
     /// One game's page.
     Details(i64),
+    /// Backlog Intelligence and suggestions.
+    Discover,
+    /// Ask questions about the library.
+    Assistant,
+    /// GameLib Wrapped: a look back at one year.
+    Wrapped(i32),
     Franchises,
     Stats,
     Profile,
@@ -72,8 +93,11 @@ impl Screen {
         Some(match name {
             "home" => Screen::Home,
             "library" => Screen::Library,
+            "discover" => Screen::Discover,
+            "assistant" => Screen::Assistant,
             "franchises" => Screen::Franchises,
             "stats" => Screen::Stats,
+            "wrapped" => Screen::Wrapped(gamelib::patterns::year_of(now(), local_offset())),
             "profile" => Screen::Profile,
             "shop" => Screen::Shop,
             "settings" => Screen::Settings,
@@ -92,6 +116,8 @@ pub enum Filter {
     Hidden,
     Tag(i64),
     Source(Source),
+    /// A smart collection, by its place in the saved list.
+    Smart(usize),
 }
 
 /// Everything loaded from the database for drawing. Screens read from
@@ -121,6 +147,21 @@ pub struct Data {
     pub extras: HashMap<i64, GameExtras>,
     /// What to play next, best first.
     pub recommendations: Vec<Recommendation>,
+    /// How well every unplayed game matches your tastes, best first.
+    pub taste: Vec<Recommendation>,
+    /// Each game's tags, leaving out collections.
+    pub taste_tags: HashMap<i64, Vec<String>>,
+    /// How you tend to play.
+    pub habits: Habits,
+    /// Saved smart collections.
+    pub smart: Vec<gamelib::smart::SmartCollection>,
+    /// Every finished play session.
+    pub sessions: Vec<gamelib::patterns::SessionRow>,
+    /// When and how you play, over all sessions.
+    pub patterns: gamelib::patterns::Patterns,
+    pub achievements: Vec<gamelib::achievements::Achievement>,
+    /// Each game's tags and collections.
+    pub all_tags: HashMap<i64, Vec<String>>,
 }
 
 impl Data {
@@ -138,6 +179,7 @@ impl Data {
             Filter::Hidden => query.include_hidden = true,
             Filter::Tag(tag_id) => query.tag_id = Some(tag_id),
             Filter::Source(source) => query.source = Some(source),
+            Filter::Smart(_) => {} // applied below, once extras are loaded
         }
         let mut games = db.query_games(&query)?;
         match filter {
@@ -163,14 +205,44 @@ impl Data {
             .filter(|(tag, _)| tag.is_collection)
             .map(|(tag, _)| tag.name.as_str())
             .collect();
-        let mut taste_tags = db.all_game_tags()?;
+        let all_tags = db.all_game_tags()?;
+        let smart = db.smart_collections()?;
+        if let Filter::Smart(index) = filter {
+            match smart.get(index) {
+                Some(collection) => {
+                    let none = Vec::new();
+                    games.retain(|g| {
+                        let e = extras.get(&g.id).cloned().unwrap_or_default();
+                        collection
+                            .rules
+                            .matches(g, &e, all_tags.get(&g.id).unwrap_or(&none), now())
+                    });
+                }
+                None => games.clear(),
+            }
+        }
+        let mut taste_tags = all_tags.clone();
         for names in taste_tags.values_mut() {
             names.retain(|name| !collections.contains(name.as_str()));
         }
-        let recommendations = insights::recommend(&visible, &extras, &taste_tags, 12);
+        let taste = insights::recommend(&visible, &extras, &taste_tags, usize::MAX);
+        let recommendations = taste.iter().take(12).cloned().collect();
+        let sessions = db.session_rows(i64::MIN)?;
+        let habits = gamelib::backlog::habits(&sessions, now());
+        let patterns = gamelib::patterns::patterns(&sessions, now(), local_offset());
+        let achievements =
+            gamelib::achievements::achievements(&visible, &extras, &sessions, &patterns);
         Ok(Data {
             extras,
             recommendations,
+            taste,
+            taste_tags,
+            habits,
+            smart,
+            all_tags,
+            sessions,
+            patterns,
+            achievements,
             visible,
             games,
             hidden_count,
@@ -210,6 +282,7 @@ pub struct SettingsInputs {
     pub folders: Vec<PathBuf>,
     pub steamgriddb_key: String,
     pub steam_key: String,
+    pub anthropic_key: String,
 }
 
 /// Everything the window is showing right now.
@@ -248,6 +321,19 @@ pub struct GameLibApp {
     forced_backdrop: Option<Backdrop>,
     /// This PC's specs, read once in the background at startup.
     specs: std::sync::Arc<std::sync::Mutex<Option<PcSpecs>>>,
+    /// Couch Mode, while it's open.
+    couch: Option<couch::Couch>,
+    /// Set when Couch Mode was opened at startup and still needs full screen.
+    couch_fullscreen_pending: bool,
+    /// Game controllers.
+    pad: couch::Pad,
+    /// Discover: how much free time you have, and what you're after.
+    discover_free: u32,
+    discover_goal: Goal,
+    /// The conversation on the Assistant screen.
+    chat: assistant::Chat,
+    /// What's being typed in a game's notes panel.
+    notes_draft: Option<game_extras::NotesDraft>,
     /// Whether the backgrounds move.
     animate: bool,
     /// The clock the backgrounds are drawn at this frame, or `None` when
@@ -257,7 +343,9 @@ pub struct GameLibApp {
 
 /// Open the window and run until it is closed.
 pub fn run(start_screen: Option<&str>) -> Result<()> {
-    let screen = match start_screen {
+    // `gamelib ui couch` opens straight into Couch Mode.
+    let start_couch = start_screen == Some("couch");
+    let screen = match start_screen.filter(|name| *name != "couch") {
         Some(name) => {
             Screen::parse(name).ok_or_else(|| anyhow::anyhow!("unknown screen '{name}'"))?
         }
@@ -292,14 +380,14 @@ pub fn run(start_screen: Option<&str>) -> Result<()> {
             // screen updates even if the mouse isn't moving.
             let ctx = cc.egui_ctx.clone();
             let worker = Worker::spawn(config, move || ctx.request_repaint())?;
-            Ok(Box::new(GameLibApp::new(db, worker, screen)?))
+            Ok(Box::new(GameLibApp::new(db, worker, screen, start_couch)?))
         }),
     )
     .map_err(|err| anyhow::anyhow!("the window couldn't be opened: {err}"))
 }
 
 impl GameLibApp {
-    fn new(db: Db, worker: Worker, screen: Screen) -> Result<GameLibApp> {
+    fn new(db: Db, worker: Worker, screen: Screen, start_couch: bool) -> Result<GameLibApp> {
         // Count any playtime left over from a crash, and make sure the
         // profile exists.
         db.recover_unfinished_sessions()?;
@@ -307,6 +395,16 @@ impl GameLibApp {
         db.refresh_exe_installed()?;
         db.grant_free_items(now())?;
         db.grant_earned_items(now())?;
+        // Load anything your other PCs saved to the sync folder.
+        match db.sync_pull(now()) {
+            Ok(Some(summary)) => log::info!(
+                "sync: loaded {} new and {} updated games",
+                summary.added,
+                summary.updated
+            ),
+            Ok(None) => {}
+            Err(err) => log::warn!("couldn't load from the sync folder: {err:#}"),
+        }
 
         // GAMELIB_THEME=constellation (or aurora, synthwave, ember) shows a
         // look without owning it. For trying things out.
@@ -321,6 +419,7 @@ impl GameLibApp {
             folders: db.scan_folders()?,
             steamgriddb_key: db.get_setting(keys::STEAMGRIDDB_KEY)?.unwrap_or_default(),
             steam_key: db.get_setting(keys::STEAM_API_KEY)?.unwrap_or_default(),
+            anthropic_key: db.get_setting(keys::ANTHROPIC_KEY)?.unwrap_or_default(),
         };
         // Reading the PC's specs takes a moment, so it's done on its own
         // thread rather than holding up the window.
@@ -335,6 +434,13 @@ impl GameLibApp {
             data: Data::load(&db, Filter::All, "", SortBy::LastPlayed)?,
             animate: db.get_bool_setting(ANIMATE_KEY, true)?,
             anim_time: None,
+            couch: None,
+            couch_fullscreen_pending: false,
+            pad: couch::Pad::new(),
+            discover_free: 120,
+            discover_goal: Goal::Anything,
+            chat: assistant::Chat::default(),
+            notes_draft: None,
             settings,
             db,
             worker,
@@ -355,6 +461,11 @@ impl GameLibApp {
             preview: None,
             forced_backdrop,
         };
+        if start_couch || app.db.get_bool_setting(COUCH_KEY, false)? {
+            // Full screen is asked for on the first frame (there's no window yet).
+            app.couch = Some(couch::Couch::new());
+            app.couch_fullscreen_pending = true;
+        }
         if app.db.get_bool_setting(keys::SCAN_ON_STARTUP, false)? {
             // The scan looks for artwork itself when it finishes.
             app.start_job(Job::ScanLibrary, "Scanning for games…");
@@ -400,6 +511,17 @@ impl GameLibApp {
     }
 
     /// Show the library narrowed to a filter.
+    /// Delete a saved smart collection.
+    fn delete_smart(&mut self, index: usize) {
+        let mut list = self.data.smart.clone();
+        if index < list.len() {
+            list.remove(index);
+            if self.check(self.db.set_smart_collections(&list)).is_some() {
+                self.show_filter(Filter::All);
+            }
+        }
+    }
+
     fn show_filter(&mut self, filter: Filter) {
         self.filter = filter;
         self.screen = Screen::Library;
@@ -541,8 +663,16 @@ impl GameLibApp {
                     self.job_done();
                     self.status = format!("Friends updated ({}).", friends.len());
                 }
+                WorkerResult::AssistantReply(reply) => {
+                    self.job_done();
+                    self.status.clear();
+                    self.claude_replied(reply);
+                }
                 WorkerResult::Error { context, message } => {
                     self.job_done();
+                    if context.starts_with("Couldn't ask Claude") {
+                        self.chat.waiting = false;
+                    }
                     // A launch that failed isn't running.
                     if context.starts_with("Couldn't start") {
                         self.running.clear();
@@ -618,7 +748,7 @@ impl GameLibApp {
         );
 
         ui.vertical_centered(|ui| {
-            ui.spacing_mut().item_spacing.y = 10.0;
+            ui.spacing_mut().item_spacing.y = 8.0;
             ui.add_space(34.0);
 
             // The orb: your profile.
@@ -650,14 +780,25 @@ impl GameLibApp {
             for (screen, icon, tip) in [
                 (Screen::Home, Icon::Home, "Home"),
                 (Screen::Library, Icon::Library, "Library"),
+                (
+                    Screen::Discover,
+                    Icon::Discover,
+                    "Discover: your backlog and what to play",
+                ),
+                (
+                    Screen::Assistant,
+                    Icon::Assistant,
+                    "Assistant: ask about your library",
+                ),
                 (Screen::Franchises, Icon::Franchises, "Franchises"),
                 (Screen::Stats, Icon::Stats, "Stats"),
                 (Screen::Shop, Icon::Shop, "Shop"),
                 (Screen::Settings, Icon::Settings, "Settings"),
             ] {
                 let selected = self.screen == screen
-                    || (screen == Screen::Library && matches!(self.screen, Screen::Details(_)));
-                let (rect, response) = ui.allocate_exact_size(vec2(54.0, 54.0), Sense::click());
+                    || (screen == Screen::Library && matches!(self.screen, Screen::Details(_)))
+                    || (screen == Screen::Stats && matches!(self.screen, Screen::Wrapped(_)));
+                let (rect, response) = ui.allocate_exact_size(vec2(50.0, 50.0), Sense::click());
                 if selected {
                     ui.painter().rect_filled(rect, 14.0, theme.panel_alt);
                     ui.painter().rect_stroke(
@@ -679,6 +820,23 @@ impl GameLibApp {
                 {
                     self.go(screen);
                 }
+            }
+
+            // Couch Mode, at the bottom of the rail.
+            ui.add_space(10.0);
+            let (rect, response) = ui.allocate_exact_size(vec2(54.0, 54.0), Sense::click());
+            if response.hovered() {
+                ui.painter()
+                    .rect_filled(rect, 14.0, theme.panel_alt.gamma_multiply(0.5));
+            }
+            paint::icon(ui.painter(), Icon::Couch, rect.center(), theme.muted);
+            if response
+                .on_hover_text("Couch Mode: full screen, for a TV and controller (F11)")
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                let ctx = ui.ctx().clone();
+                self.enter_couch(&ctx);
             }
         });
     }
@@ -740,6 +898,13 @@ impl GameLibApp {
 }
 
 impl eframe::App for GameLibApp {
+    /// Save the library to the sync folder (if one is set) on the way out.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if let Err(err) = self.db.sync_push(now()) {
+            log::warn!("couldn't save to the sync folder: {err:#}");
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_worker_results(&ctx);
@@ -767,6 +932,26 @@ impl eframe::App for GameLibApp {
             self.theme = theme;
             self.theme_applied = true;
             theme.apply(&ctx);
+        }
+
+        // Controllers, and Couch Mode, which takes over the whole window.
+        let pad_input = self.pad.poll(time);
+        if std::mem::take(&mut self.couch_fullscreen_pending) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+        }
+        if let Some(couch) = &self.couch {
+            let input = pad_input.merge(couch::keyboard_input(&ctx, couch.typing()));
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ui, |ui| self.couch_screen(ui, input));
+            return;
+        }
+        if pad_input.start || ctx.input(|i| i.key_pressed(egui::Key::F11)) {
+            self.enter_couch(&ctx);
+        }
+        if self.pad.connected() {
+            // Look for the controller's Start button now and then.
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
         // Background first, then the panels on top of it. An animated
@@ -822,6 +1007,9 @@ impl eframe::App for GameLibApp {
                                     Screen::Home => self.home_screen(ui),
                                     Screen::Library => self.library_screen(ui),
                                     Screen::Details(game_id) => self.details_screen(ui, game_id),
+                                    Screen::Discover => self.discover_screen(ui),
+                                    Screen::Assistant => self.assistant_screen(ui),
+                                    Screen::Wrapped(year) => self.wrapped_screen(ui, year),
                                     Screen::Franchises => self.franchises_screen(ui),
                                     Screen::Stats => self.stats_screen(ui),
                                     Screen::Profile => self.profile_screen(ui),

@@ -83,8 +83,54 @@ scan, with no key needed. Watch the bar at the bottom for progress. It
 needs an internet connection the first time; if you are offline it tries
 again next start.
 
-The icons down the left are Profile, Home, Library, Franchises, Stats,
-Shop and Settings.
+The icons down the left are Profile, Home, Library, Discover, Assistant,
+Franchises, Stats, Shop and Settings. The TV icon at the bottom opens
+**Couch Mode**.
+
+### What's where
+
+- **Discover** (compass icon): Backlog Intelligence. A summary ("You own
+  146 games. You've played 38, completed 12, and haven't launched 72."),
+  what to play tonight for the time you have, what to finish next, games
+  you've neglected, and short games you could beat in a weekend.
+- **Assistant** (speech bubble): ask about your library in plain words:
+  "What should I play tonight?", "Which games have I neglected?", "My five
+  most played games", "Something like Elden Ring", "What should I complete
+  next?". It answers from your library, offline. Add an Anthropic API key
+  under **Settings → API keys** and questions go to Claude instead, which
+  can answer anything (it is sent a summary of your library: titles,
+  hours, status, ratings and genres; untick the box in Settings to stop
+  that). Using Claude is billed to your Anthropic account.
+- **A game's page**: status, rating, **hours to beat** (look it up on
+  HowLongToBeat.com; without it GameLib guesses from the genre), your notes
+  and review, and a **game process** name for games whose exe runs from
+  somewhere other than their folder, so their playtime is still counted.
+- **Library → More…**: smart collections, saved filters like "short and
+  unplayed" or "rated 4+ and unfinished" that keep themselves up to date.
+  Right-click one, or press **Edit rules**, to change it.
+- **Stats**: when you play, your habits and streaks, top genres, and 20
+  achievements to unlock. **Your Wrapped** looks back at a year.
+- **Settings → Sync between PCs**: pick a folder that OneDrive, Dropbox or
+  Google Drive syncs, and your library follows you between PCs.
+
+### Couch Mode
+
+A full-screen view for playing on a TV with a controller. Open it with the
+TV icon, **F11**, or the **Start** button on a controller; tick **Settings →
+Open in Couch Mode** to start in it every time.
+
+| Controller | Keyboard | Does |
+|---|---|---|
+| Left stick / D-pad | Arrow keys | Move through games |
+| LB / RB | Q / E | Change tab (Home, Library, Collections, Search) |
+| A | Enter | Play (or open a collection) |
+| Y | I | Details |
+| X | F | Favourite |
+| B | Esc | Back, or leave Couch Mode |
+| Start | F11 | Leave Couch Mode |
+
+In Search, type on the keyboard or use the on-screen letters (up and down
+switch between the letters and the results).
 
 ## If something goes wrong
 

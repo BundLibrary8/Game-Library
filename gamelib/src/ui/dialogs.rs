@@ -13,6 +13,7 @@ use gamelib::worker::Job;
 use gamelib::{now, paths};
 
 use super::profile::dashed_slot;
+use super::smart::{self as smart_ui, SmartDraft};
 use super::theme::{Theme, bold};
 use super::{Data, GameLibApp, Screen, paint};
 
@@ -86,6 +87,8 @@ pub enum Dialog {
         game_id: i64,
     },
     EditProfile(Box<ProfileDraft>),
+    /// Making or editing a smart collection.
+    Smart(Box<SmartDraft>),
 }
 
 impl Dialog {
@@ -311,6 +314,29 @@ impl GameLibApp {
                 }
                 Dialog::Import(rows) => outcome = import_review(ui, &theme, rows),
                 Dialog::EditProfile(draft) => outcome = self.edit_profile_dialog(ui, draft),
+                Dialog::Smart(draft) => {
+                    let matching = draft.build().ok().map(|c| {
+                        gamelib::smart::filter(
+                            &c.rules,
+                            &self.data.visible,
+                            &self.data.extras,
+                            &self.data.all_tags,
+                            now(),
+                        )
+                        .len()
+                    });
+                    match smart_ui::editor(ui, &theme, draft, matching) {
+                        Some(smart_ui::Action::Save) => outcome = Outcome::Confirm,
+                        Some(smart_ui::Action::Cancel) => outcome = Outcome::Cancel,
+                        Some(smart_ui::Action::Delete) => {
+                            if let Some(index) = draft.index {
+                                self.delete_smart(index);
+                            }
+                            outcome = Outcome::Cancel;
+                        }
+                        None => {}
+                    }
+                }
             });
         if modal.should_close() && outcome == Outcome::StayOpen {
             outcome = Outcome::Cancel;
@@ -390,6 +416,25 @@ impl GameLibApp {
                     .map(|row| row.game)
                     .collect();
                 self.start_job(Job::Import(games), "Adding games…");
+            }
+            Dialog::Smart(draft) => {
+                let Ok(collection) = draft.build() else {
+                    return;
+                };
+                let mut list = self.data.smart.clone();
+                let index = match draft.index.filter(|i| *i < list.len()) {
+                    Some(i) => {
+                        list[i] = collection;
+                        i
+                    }
+                    None => {
+                        list.push(collection);
+                        list.len() - 1
+                    }
+                };
+                if self.check(self.db.set_smart_collections(&list)).is_some() {
+                    self.show_filter(super::Filter::Smart(index));
+                }
             }
             Dialog::EditProfile(draft) => {
                 if let Err(err) = self.save_profile(&draft) {
