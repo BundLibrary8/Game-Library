@@ -24,6 +24,12 @@ pub enum Backdrop {
     Ember,
     Aurora,
     Synthwave,
+    Fireflies,
+    Ocean,
+    Sakura,
+    Rain,
+    Nebula,
+    Frost,
 }
 
 impl Backdrop {
@@ -34,6 +40,12 @@ impl Backdrop {
             "bg_ember" => Backdrop::Ember,
             "bg_aurora" => Backdrop::Aurora,
             "bg_synthwave_grid" => Backdrop::Synthwave,
+            "bg_fireflies" => Backdrop::Fireflies,
+            "bg_ocean" => Backdrop::Ocean,
+            "bg_sakura" => Backdrop::Sakura,
+            "bg_neon_rain" => Backdrop::Rain,
+            "bg_cosmic_nebula" => Backdrop::Nebula,
+            "bg_frost" => Backdrop::Frost,
             _ => Backdrop::Constellation,
         }
     }
@@ -149,12 +161,69 @@ impl Theme {
         }
     }
 
+    /// A theme from its colours: background, panel tint, text, muted
+    /// text, the accent pair, and text on the accent.
+    #[allow(clippy::too_many_arguments)]
+    fn made(
+        backdrop: Backdrop,
+        bg: u32,
+        panel: u32,
+        panel_alt: u32,
+        text: u32,
+        muted: u32,
+        accent: u32,
+        accent_end: u32,
+        on_accent: u32,
+    ) -> Theme {
+        Theme {
+            backdrop,
+            bg: rgb(bg),
+            panel: rgba(panel, 155),
+            panel_alt: rgba(panel_alt, 178),
+            border: rgba(accent, 42),
+            text: rgb(text),
+            muted: rgb(muted),
+            accent: rgb(accent),
+            accent_end: rgb(accent_end),
+            on_accent: rgb(on_accent),
+            chip_selected: rgb(accent),
+            success: rgb(0x5fe0a0),
+            danger: rgb(0xff7b8a),
+            stardust: rgb(accent_end),
+        }
+    }
+
     pub fn for_backdrop(backdrop: Backdrop) -> Theme {
+        use Backdrop::*;
         match backdrop {
-            Backdrop::Constellation => Theme::constellation(),
-            Backdrop::Ember => Theme::ember(),
-            Backdrop::Aurora => Theme::aurora(),
-            Backdrop::Synthwave => Theme::synthwave(),
+            Constellation => Theme::constellation(),
+            Ember => Theme::ember(),
+            Aurora => Theme::aurora(),
+            Synthwave => Theme::synthwave(),
+            Fireflies => Theme::made(
+                Fireflies, 0x061210, 0x0c1f1a, 0x183a30, 0xf0ffe8, 0x8fb09a, 0xc8f56a, 0x6ee0b0,
+                0x0d1a08,
+            ),
+            Ocean => Theme::made(
+                Ocean, 0x020818, 0x0a1e33, 0x14324f, 0xeaf8ff, 0x86a9c4, 0x4fd4ff, 0x4f8cff,
+                0x02101c,
+            ),
+            Sakura => Theme::made(
+                Sakura, 0x1c0c22, 0x2a1230, 0x48203e, 0xfff0f6, 0xc59ab4, 0xff9cc4, 0xffd0a0,
+                0x2a0718,
+            ),
+            Rain => Theme::made(
+                Rain, 0x060a18, 0x10132a, 0x221f46, 0xf0f4ff, 0x9a9fc4, 0xff4fae, 0x40d4ff,
+                0x18041a,
+            ),
+            Nebula => Theme::made(
+                Nebula, 0x05030e, 0x150c28, 0x2a1748, 0xfaf0ff, 0xa898c8, 0xe86ad8, 0x7a8cff,
+                0x1a0620,
+            ),
+            Frost => Theme::made(
+                Frost, 0x081022, 0x112038, 0x1e3656, 0xf2f8ff, 0x93a9c4, 0x9fdcff, 0xd8f0ff,
+                0x081422,
+            ),
         }
     }
 
@@ -176,6 +245,12 @@ impl Theme {
             Backdrop::Ember => "By the fire",
             Backdrop::Aurora => "Under the lights",
             Backdrop::Synthwave => "Night drive",
+            Backdrop::Fireflies => "Deep in the woods",
+            Backdrop::Ocean => "Into the deep",
+            Backdrop::Sakura => "Petals on the wind",
+            Backdrop::Rain => "After midnight",
+            Backdrop::Nebula => "Among the stars",
+            Backdrop::Frost => "First snow",
         }
     }
 

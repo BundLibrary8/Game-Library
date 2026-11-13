@@ -184,12 +184,8 @@ impl GameLibApp {
     /// The weekly goal and game goals, if any are set.
     fn goals_strip(&mut self, ui: &mut egui::Ui) {
         let theme = self.theme;
-        let weekly = self
-            .db
-            .weekly_progress(now(), super::local_offset())
-            .ok()
-            .flatten();
-        let games = self.db.game_goals().unwrap_or_default();
+        let time = ui.input(|i| i.time);
+        let super::GoalsNow { weekly, games } = self.goals_now(time);
         if weekly.is_none() && games.is_empty() {
             return;
         }

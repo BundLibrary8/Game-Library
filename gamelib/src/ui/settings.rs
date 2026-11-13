@@ -9,8 +9,8 @@ use gamelib::worker::Job;
 
 use super::theme::{bold, source_name};
 use super::{
-    ANIMATE_KEY, CLOSE_TO_TRAY_KEY, CONTRAST_KEY, COUCH_KEY, GameLibApp, NOTIFY_KEY, SPLASH_KEY,
-    TRAY_KEY, paint,
+    ANIMATE_KEY, AUTO_DETECT_KEY, CLOSE_TO_TRAY_KEY, CONTRAST_KEY, COUCH_KEY, GameLibApp,
+    NOTIFY_KEY, SPLASH_KEY, TRAY_KEY, paint,
 };
 
 impl GameLibApp {
@@ -323,6 +323,20 @@ impl GameLibApp {
 
         theme.panel_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
+            ui.label(paint::strong("Playing games", 17.0));
+            let mut auto = self.db.get_bool_setting(AUTO_DETECT_KEY, true).unwrap_or(true);
+            if ui
+                .checkbox(
+                    &mut auto,
+                    "Track games started outside GameLib (from Steam, a desktop shortcut…)",
+                )
+                .on_hover_text("GameLib checks the running programs every 15 seconds.")
+                .changed()
+            {
+                self.check(self.db.set_bool_setting(AUTO_DETECT_KEY, auto));
+                self.worker.send(gamelib::worker::Job::WatchForGames(auto));
+            }
+            ui.add_space(10.0);
             ui.label(paint::strong("Notifications and tray", 17.0));
             let mut desktop = self.db.get_bool_setting(NOTIFY_KEY, true).unwrap_or(true);
             if ui

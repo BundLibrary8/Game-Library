@@ -198,7 +198,7 @@ impl super::GameLibApp {
     /// Things to check every frame: whether the window is in front, the
     /// tray menu, closing to the tray, new achievements and goals, and
     /// keyboard shortcuts.
-    pub fn window_events(&mut self, ctx: &egui::Context, _time: f64) {
+    pub fn window_events(&mut self, ctx: &egui::Context, time: f64) {
         let active = ctx.input(|i| {
             let viewport = i.viewport();
             viewport.focused.unwrap_or(true) && !viewport.minimized.unwrap_or(false)
@@ -265,7 +265,7 @@ impl super::GameLibApp {
         // The weekly goal.
         let now = gamelib::now();
         let offset = super::local_offset();
-        if let Ok(Some((goal, progress))) = self.db.weekly_progress(now, offset)
+        if let Some((goal, progress)) = self.goals_now(time).weekly
             && progress.reached()
         {
             let week = gamelib::journal::week_start(now, offset);

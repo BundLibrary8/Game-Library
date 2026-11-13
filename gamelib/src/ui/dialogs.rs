@@ -399,7 +399,7 @@ impl GameLibApp {
             Dialog::NewCollection { name } => {
                 if let Some(tag) = self.check(self.db.ensure_tag(&name, true)) {
                     self.status = format!(
-                        "Created {}. Add games to it from a game's ⋯ menu.",
+                        "Created {}. Add games to it from a game's ••• menu.",
                         tag.name
                     );
                 }

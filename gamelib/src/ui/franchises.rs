@@ -13,7 +13,7 @@ impl GameLibApp {
         let theme = self.theme;
         ui.label(egui::RichText::new("Franchises").font(bold(32.0)));
         ui.label(paint::muted(
-            "Series you own, in playing order. Add a game to one from its ⋯ menu.",
+            "Series you own, in playing order. Add a game to one from its ••• menu.",
             &theme,
         ));
         ui.add_space(10.0);

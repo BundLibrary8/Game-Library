@@ -27,7 +27,7 @@ walkdir = "2.5.0"
 tempfile = "3.27.0"
 
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Devices_Bluetooth", "Win32_Foundation"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Devices_Bluetooth", "Win32_Foundation", "Win32_System_Console"] }
 notify-rust = "4.19.0"
 tray-icon = "0.26.1"
 winreg = "0.56.0"

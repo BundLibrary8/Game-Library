@@ -6,10 +6,26 @@ before tagging a release.
 
 ## [0.2.0]
 
+- GameLib stays open when it starts a game: games run as separate
+  programs, the Windows build no longer opens a console window (which
+  closed GameLib if it was closed), and a problem while drawing the window
+  is shown as an error instead of closing it. Crashes are written to
+  gamelib.log.
+- Games started outside GameLib (from Steam, shortcuts…) are noticed and
+  their playtime tracked. Crash reporters, updaters and anti-cheat helpers
+  left running in a game's folder no longer count as playing.
+- Play starts straight away, even during a long artwork download or scan.
+- Faster: the library is reloaded only when something changed (and at most
+  every couple of seconds while artwork arrives); the Stats, Library
+  health and Home screens no longer redo their database and file work on
+  every frame; tag counts take one query instead of one per tag.
+- Six new animated backgrounds: Firefly Forest (free), Deep Ocean, Sakura,
+  Neon Rain, Cosmic Nebula and Frost.
+- Fixed the ••• and ▼ buttons, which showed broken symbols on Windows.
 - Devices page: connected peripherals grouped by kind, controller
   batteries, and paired Bluetooth devices with Connect / Disconnect.
 - Launch profiles: named sets of launch options per game (including Steam
-  games), picked with ▾ next to Launch.
+  games), picked with ▼ next to Launch.
 - Library health: install checks, disk space per drive, the biggest
   games, and a list of things to fix.
 - Session journal (a note per session) and playtime goals (weekly, and

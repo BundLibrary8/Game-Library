@@ -28,17 +28,26 @@ impl GameLibApp {
 
     pub fn health_screen(&mut self, ui: &mut egui::Ui) {
         let theme = self.theme;
-        let sizes = self.db.install_sizes().unwrap_or_default();
-        // Free space is looked up once per drive, not once per game.
-        let mut drive_cache: HashMap<std::path::PathBuf, Option<(std::path::PathBuf, f64)>> =
-            HashMap::new();
-        let report = health::check_library(&self.data.visible, &self.data.extras, &sizes, |dir| {
-            let key = dir.components().take(2).collect::<std::path::PathBuf>();
-            drive_cache
-                .entry(key)
-                .or_insert_with(|| health::drive_of(dir))
-                .clone()
+        // Checking every game's files and every drive's free space is too
+        // slow to do 60 times a second: it's redone every 10 seconds, or
+        // when the library changes.
+        let time = ui.input(|i| i.time);
+        let (games, extras, db) = (&self.data.visible, &self.data.extras, &self.db);
+        let cached = super::memo(&mut self.memos.health, self.generation, time, 10.0, || {
+            let sizes = db.install_sizes().unwrap_or_default();
+            // Free space is looked up once per drive, not once per game.
+            let mut drive_cache: HashMap<std::path::PathBuf, Option<(std::path::PathBuf, f64)>> =
+                HashMap::new();
+            let report = health::check_library(games, extras, &sizes, |dir| {
+                let key = dir.components().take(2).collect::<std::path::PathBuf>();
+                drive_cache
+                    .entry(key)
+                    .or_insert_with(|| health::drive_of(dir))
+                    .clone()
+            });
+            std::rc::Rc::new((report, sizes))
         });
+        let (report, sizes) = (&cached.0, &cached.1);
 
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Library health").font(bold(32.0)));

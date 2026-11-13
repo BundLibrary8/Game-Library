@@ -100,3 +100,70 @@ fn launching_a_real_process_records_its_playtime() {
     assert_eq!(db.sessions_for_game(game_id).unwrap().len(), 1);
     assert_eq!(db.stardust_balance().unwrap(), 5);
 }
+
+#[test]
+fn a_game_started_outside_gamelib_is_noticed_and_tracked() {
+    let Some(sleep) = find_sleep() else {
+        eprintln!("no sleep program found; skipping");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let game_dir = dir.path().join("Outside Game");
+    std::fs::create_dir(&game_dir).unwrap();
+    let exe = game_dir.join("outside.exe");
+    std::fs::copy(&sleep, &exe).unwrap();
+
+    let db_path = dir.path().join("library.db");
+    let db = Db::open(&db_path).unwrap();
+    let game = DetectedGame {
+        title: "Outside Game".into(),
+        source: Source::Manual,
+        source_id: exe.to_string_lossy().into_owned(),
+        install_dir: Some(game_dir.clone()),
+        launch: LaunchTarget::exe(exe.clone()),
+    };
+    let game_id = db.upsert_detected(&game, gamelib::now()).unwrap().game_id;
+
+    // The "game" is started by someone else, not GameLib.
+    let mut child = std::process::Command::new(&exe).arg("5").spawn().unwrap();
+
+    let config = WorkerConfig {
+        db_path,
+        covers_dir: dir.path().join("covers"),
+        icons_dir: dir.path().join("icons"),
+        timings: Timings {
+            poll_waiting: 1,
+            poll_running: 1,
+            checkpoint_every: 2,
+            exit_grace: 2,
+            start_timeout: 20,
+        },
+    };
+    let worker = Worker::spawn(config, || {}).unwrap();
+    worker.send(Job::WatchForGames(true));
+
+    let mut started = false;
+    let summary = loop {
+        match worker
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the watcher never noticed the game")
+        {
+            WorkerResult::SessionStarted { game_id: id } => {
+                assert_eq!(id, game_id);
+                started = true;
+            }
+            WorkerResult::SessionEnded { summary, .. } => break summary,
+            other => panic!("unexpected result: {other:?}"),
+        }
+    };
+    let _ = child.wait();
+    assert!(started);
+    assert_eq!(summary.game_id, game_id);
+    assert!(
+        summary.duration_secs >= 2,
+        "measured {} s",
+        summary.duration_secs
+    );
+    assert_eq!(db.sessions_for_game(game_id).unwrap().len(), 1);
+    worker.shutdown();
+}
