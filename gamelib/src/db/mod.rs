@@ -133,6 +133,9 @@ const MIGRATIONS: &[&str] = &[
     // v5: when artwork was last looked for online, so games with none
     // anywhere aren't looked up again on every start
     "ALTER TABLE games ADD COLUMN art_checked_at INTEGER;",
+    // v6: covers are now looked for in more places, so games marked as
+    // having none anywhere are given another try
+    "UPDATE games SET art_checked_at = NULL WHERE cover_path IS NULL;",
 ];
 
 /// A connection to the library database.

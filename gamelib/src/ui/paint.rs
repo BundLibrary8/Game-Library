@@ -567,7 +567,65 @@ pub fn title_colours(title: &str) -> (Color32, Color32) {
 
 /// The address egui's image loader uses for a file on disk.
 pub fn file_uri(path: &std::path::Path) -> String {
-    format!("file://{}", path.display())
+    file_uri_from_text(&path.to_string_lossy())
+}
+
+/// Turn a path, written as text, into a `file://` address.
+///
+/// This needs care on Windows. egui reads anything after `file://` that
+/// doesn't start with `/` as a network share, so `file://C:\x.jpg` would
+/// be looked for at `\\C:\x.jpg` and never found. The standard form,
+/// `file:///C:/x.jpg`, is read correctly on every system.
+pub fn file_uri_from_text(path: &str) -> String {
+    let path = gamelib::paths::strip_verbatim_prefix(path).replace('\\', "/");
+    if path.starts_with("//") {
+        // A network share (`\\server\share\…`): file://server/share/…
+        format!("file:{path}")
+    } else if path.starts_with('/') {
+        format!("file://{path}") // Linux and macOS: file:///home/…
+    } else {
+        format!("file:///{path}") // Windows: file:///C:/Users/…
+    }
+}
+
+/// Paths whose pictures failed to load, so each failure is logged once
+/// rather than on every frame.
+fn note_failed_picture(path: &std::path::Path, err: &impl std::fmt::Display) {
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
+    static FAILED: OnceLock<Mutex<HashSet<std::path::PathBuf>>> = OnceLock::new();
+    let mut failed = FAILED
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if failed.insert(path.to_path_buf()) {
+        log::warn!("couldn't show the picture {}: {err}", path.display());
+    }
+}
+
+/// Draw a picture file stretched to fill `rect`. Returns false if it
+/// can't be shown (still loading, or unreadable), so the caller can draw
+/// something in its place.
+pub fn file_image(ui: &Ui, path: &std::path::Path, rect: Rect, radius: f32) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let image = egui::Image::from_uri(file_uri(path))
+        .corner_radius(radius)
+        .fit_to_exact_size(rect.size())
+        .maintain_aspect_ratio(false);
+    match image.load_for_size(ui.ctx(), rect.size()) {
+        Ok(egui::load::TexturePoll::Ready { .. }) => {
+            image.paint_at(ui, rect);
+            true
+        }
+        // egui asks for a redraw once the file has been read.
+        Ok(egui::load::TexturePoll::Pending { .. }) => false,
+        Err(err) => {
+            note_failed_picture(path, &err);
+            false
+        }
+    }
 }
 
 /// Paint a game's cover into `rect`: its cover picture if it has one,
@@ -578,17 +636,18 @@ pub fn cover(ui: &Ui, rect: Rect, game: &Game, radius: f32, title_size: f32) {
         return;
     }
     let painter = ui.painter();
-    match game.cover_path.as_deref().filter(|path| path.is_file()) {
-        Some(path) => {
-            egui::Image::from_uri(file_uri(path))
-                .corner_radius(radius)
-                .paint_at(ui, rect);
-        }
-        None => {
+    let showed_cover = game
+        .cover_path
+        .as_deref()
+        .is_some_and(|path| file_image(ui, path, rect, radius));
+    // No cover (or it couldn't be read): a gradient with the icon and title.
+    match showed_cover {
+        true => {}
+        false => {
             let (top, bottom) = title_colours(&game.title);
             gradient(painter, rect, radius, top, bottom, vec2(0.25, 1.0));
             // The game's own icon (read from its exe), on a soft plate.
-            if let Some(icon) = game.icon_path.as_deref().filter(|path| path.is_file()) {
+            if let Some(icon) = game.icon_path.as_deref() {
                 let side = (rect.width() * 0.4).clamp(24.0, 128.0);
                 let centre = pos2(rect.center().x, rect.top() + rect.height() * 0.4);
                 let plate = Rect::from_center_size(centre, Vec2::splat(side * 1.4));
@@ -599,9 +658,12 @@ pub fn cover(ui: &Ui, rect: Rect, game: &Game, radius: f32, title_size: f32) {
                     Stroke::new(1.0, Color32::from_white_alpha(40)),
                     egui::StrokeKind::Inside,
                 );
-                egui::Image::from_uri(file_uri(icon))
-                    .corner_radius(side * 0.12)
-                    .paint_at(ui, Rect::from_center_size(centre, Vec2::splat(side)));
+                file_image(
+                    ui,
+                    icon,
+                    Rect::from_center_size(centre, Vec2::splat(side)),
+                    side * 0.12,
+                );
             }
             if title_size > 0.0 {
                 let pad = (rect.width() * 0.06).max(8.0);
@@ -678,15 +740,12 @@ pub fn banner(
     radius: f32,
 ) {
     let painter = ui.painter();
+    if let Some(Banner::Upload(path)) = banner
+        && file_image(ui, path, rect, radius)
+    {
+        return;
+    }
     match banner {
-        Some(Banner::Upload(path)) if path.is_file() => {
-            // Fill the rectangle with the middle of the picture.
-            egui::Image::from_uri(file_uri(path))
-                .corner_radius(radius)
-                .fit_to_exact_size(rect.size())
-                .maintain_aspect_ratio(false)
-                .paint_at(ui, rect);
-        }
         Some(Banner::Game(id)) => {
             let title = games
                 .iter()
@@ -747,15 +806,9 @@ pub fn avatar(
 ) {
     let rect = Rect::from_center_size(centre, Vec2::splat(radius * 2.0));
     let painter = ui.painter();
-    match picture.filter(|p| p.is_file()) {
-        Some(path) => {
-            egui::Image::from_uri(file_uri(path))
-                .corner_radius(radius)
-                .fit_to_exact_size(rect.size())
-                .maintain_aspect_ratio(false)
-                .paint_at(ui, rect);
-        }
-        None => {
+    match picture.is_some_and(|path| file_image(ui, path, rect, radius)) {
+        true => {}
+        false => {
             let (from, to) = (theme.accent, theme.accent_end);
             gradient(painter, rect, radius, from, to, vec2(0.6, 1.0));
             let initial = name
@@ -1126,4 +1179,64 @@ pub fn play_triangle(painter: &egui::Painter, centre: Pos2, size: f32, colour: C
         centre + vec2(-size * 0.4, size * 0.5),
     ];
     painter.add(egui::Shape::convex_polygon(points, colour, Stroke::NONE));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What egui's file loader turns an address into on Windows (a copy of
+    /// its rule, so it can be checked from any system).
+    fn egui_windows_path(uri: &str) -> String {
+        let rest = uri.strip_prefix("file://").expect("a file address");
+        match rest.strip_prefix('/') {
+            Some(path) => path.to_string(),
+            None => format!("\\\\{rest}"),
+        }
+    }
+
+    #[test]
+    fn windows_paths_become_standard_file_addresses() {
+        let path = r"C:\Users\Mo Smith\AppData\Roaming\gamelib\covers\5.jpg";
+        let uri = file_uri_from_text(path);
+        assert_eq!(
+            uri,
+            "file:///C:/Users/Mo Smith/AppData/Roaming/gamelib/covers/5.jpg"
+        );
+        assert_eq!(
+            egui_windows_path(&uri),
+            "C:/Users/Mo Smith/AppData/Roaming/gamelib/covers/5.jpg",
+            "egui finds the file on the C: drive, not a network share"
+        );
+    }
+
+    #[test]
+    fn the_old_address_was_read_as_a_network_share() {
+        // The bug this fixes: no slash after file://, so egui went looking
+        // on a network share called C: and never found the cover.
+        assert_eq!(
+            egui_windows_path(r"file://C:\gamelib\covers\5.jpg"),
+            r"\\C:\gamelib\covers\5.jpg"
+        );
+    }
+
+    #[test]
+    fn other_kinds_of_path() {
+        assert_eq!(
+            file_uri_from_text(r"\\?\C:\games\x.png"),
+            "file:///C:/games/x.png"
+        );
+        assert_eq!(
+            file_uri_from_text(r"\\nas\games\c.jpg"),
+            "file://nas/games/c.jpg"
+        );
+        assert_eq!(
+            egui_windows_path("file://nas/games/c.jpg"),
+            r"\\nas/games/c.jpg"
+        );
+        assert_eq!(
+            file_uri_from_text("/home/me/covers/5.jpg"),
+            "file:///home/me/covers/5.jpg"
+        );
+    }
 }

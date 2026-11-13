@@ -527,7 +527,13 @@ impl WorkerState {
             })
         };
         if let Some(app_id) = &steam_app {
-            for url in artwork::steam_cdn_cover_urls(app_id) {
+            // Ask Steam for the exact address first, then try the usual ones.
+            let mut urls = metadata::steam_cover_urls(client, app_id).unwrap_or_else(|err| {
+                note("Steam store items lookup failed", &err);
+                Vec::new()
+            });
+            urls.extend(artwork::steam_cdn_cover_urls(app_id));
+            for url in urls {
                 match metadata::download_cover(client, &url, covers_dir, game.id) {
                     Ok(path) => return Ok(Some(path)),
                     Err(err) => note("no cover on Steam's image server", &err),

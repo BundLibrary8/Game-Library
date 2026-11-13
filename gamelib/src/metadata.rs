@@ -22,6 +22,12 @@ use crate::model::{Game, Source};
 const SGDB_API: &str = "https://www.steamgriddb.com/api/v2";
 const STEAM_STORE_API: &str = "https://store.steampowered.com/api/appdetails";
 const STEAM_SEARCH_API: &str = "https://store.steampowered.com/api/storesearch/";
+const STEAM_ITEMS_API: &str = "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/";
+/// Where Steam's store pictures are served from.
+const STEAM_ASSET_HOSTS: [&str; 2] = [
+    "https://shared.akamai.steamstatic.com/store_item_assets/",
+    "https://shared.cloudflare.steamstatic.com/store_item_assets/",
+];
 const COVER_DIMENSIONS: &str = "600x900";
 /// Wait this long between requests, to be polite and avoid rate limits.
 pub const REQUEST_PAUSE: Duration = Duration::from_millis(500);
@@ -328,6 +334,79 @@ pub fn find_steam_app(client: &Client, title: &str) -> Result<Option<String>> {
     parse_store_search(&json, title)
 }
 
+#[derive(Deserialize)]
+struct ItemsReply {
+    #[serde(default)]
+    response: ItemsResponse,
+}
+
+#[derive(Deserialize, Default)]
+struct ItemsResponse {
+    #[serde(default)]
+    store_items: Vec<StoreItem>,
+}
+
+#[derive(Deserialize)]
+struct StoreItem {
+    assets: Option<StoreAssets>,
+}
+
+#[derive(Deserialize)]
+struct StoreAssets {
+    /// e.g. `steam/apps/570/${FILENAME}?t=123`. Newer games have an extra
+    /// folder with a meaningless name, which is why this is asked for
+    /// rather than guessed.
+    asset_url_format: Option<String>,
+    library_capsule: Option<String>,
+    library_capsule_2x: Option<String>,
+}
+
+/// The portrait cover addresses in a Steam `GetItems` reply, most suitable
+/// first.
+pub fn parse_store_item_covers(json: &str) -> Result<Vec<String>> {
+    let reply: ItemsReply =
+        serde_json::from_str(json).context("unexpected reply from Steam's store items")?;
+    let mut urls = Vec::new();
+    for assets in reply
+        .response
+        .store_items
+        .into_iter()
+        .filter_map(|item| item.assets)
+    {
+        let Some(format) = assets.asset_url_format else {
+            continue;
+        };
+        // The normal size is plenty for a 360x540 cover, so it comes first.
+        for file in [assets.library_capsule, assets.library_capsule_2x]
+            .into_iter()
+            .flatten()
+        {
+            for host in STEAM_ASSET_HOSTS {
+                urls.push(format!("{host}{}", format.replace("${FILENAME}", &file)));
+            }
+        }
+    }
+    Ok(urls)
+}
+
+/// Ask Steam where a game's portrait cover is. No key is needed.
+pub fn steam_cover_urls(client: &Client, app_id: &str) -> Result<Vec<String>> {
+    let app_id: u64 = app_id.parse().context("a Steam app id is a number")?;
+    let request = serde_json::json!({
+        "ids": [{ "appid": app_id }],
+        "context": { "language": "english", "country_code": "US" },
+        "data_request": { "include_assets": true }
+    });
+    let json = client
+        .get(STEAM_ITEMS_API)
+        .query(&[("input_json", request.to_string())])
+        .send()
+        .context("couldn't reach Steam's store items")?
+        .error_for_status()?
+        .text()?;
+    parse_store_item_covers(&json)
+}
+
 /// Fetch a Steam game's store info.
 pub fn fetch_store_info(client: &Client, app_id: &str) -> Result<Option<StoreInfo>> {
     let json = client
@@ -437,6 +516,24 @@ mod tests {
         assert_eq!(find("!!!"), None);
         assert!(parse_store_search("<html>", "x").is_err());
         assert_eq!(parse_store_search("{}", "x").unwrap(), None);
+    }
+
+    #[test]
+    fn store_items_give_the_exact_cover_address() {
+        const ITEMS: &str = include_str!("../tests/fixtures/steam_getitems.json");
+        let urls = parse_store_item_covers(ITEMS).unwrap();
+        assert_eq!(
+            urls[0],
+            "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2246340/4f8c2a9e/library_600x900.jpg?t=1730000000"
+        );
+        assert_eq!(urls.len(), 4, "normal and large, from both hosts: {urls:?}");
+        assert!(urls[2].contains("library_600x900_2x.jpg"));
+        assert!(
+            parse_store_item_covers(r#"{"response":{}}"#)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(parse_store_item_covers("<html>").is_err());
     }
 
     #[test]
