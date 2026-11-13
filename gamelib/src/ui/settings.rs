@@ -8,7 +8,7 @@ use gamelib::shop::{self, ItemKind};
 use gamelib::worker::Job;
 
 use super::theme::{bold, source_name};
-use super::{ANIMATE_KEY, GameLibApp, paint};
+use super::{ANIMATE_KEY, COUCH_KEY, GameLibApp, paint};
 
 impl GameLibApp {
     pub fn settings_screen(&mut self, ui: &mut egui::Ui) {
@@ -154,6 +154,14 @@ impl GameLibApp {
             });
             if let Some(choice) = choice {
                 self.check(self.db.equip_library_background(Some(choice)));
+            }
+            let mut couch = self.db.get_bool_setting(COUCH_KEY, false).unwrap_or(false);
+            if ui
+                .checkbox(&mut couch, "Open in Couch Mode")
+                .on_hover_text("Start full screen, ready for a TV and controller. Press F11 or Esc to leave it.")
+                .changed()
+            {
+                self.check(self.db.set_bool_setting(COUCH_KEY, couch));
             }
             let mut animate = self.animate;
             if ui

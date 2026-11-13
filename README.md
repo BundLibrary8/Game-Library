@@ -84,7 +84,26 @@ needs an internet connection the first time; if you are offline it tries
 again next start.
 
 The icons down the left are Profile, Home, Library, Franchises, Stats,
-Shop and Settings.
+Shop and Settings. The TV icon at the bottom opens **Couch Mode**.
+
+### Couch Mode
+
+A full-screen view for playing on a TV with a controller. Open it with the
+TV icon, **F11**, or the **Start** button on a controller; tick **Settings →
+Open in Couch Mode** to start in it every time.
+
+| Controller | Keyboard | Does |
+|---|---|---|
+| Left stick / D-pad | Arrow keys | Move through games |
+| LB / RB | Q / E | Change tab (Home, Library, Collections, Search) |
+| A | Enter | Play (or open a collection) |
+| Y | I | Details |
+| X | F | Favourite |
+| B | Esc | Back, or leave Couch Mode |
+| Start | F11 | Leave Couch Mode |
+
+In Search, type on the keyboard or use the on-screen letters (up and down
+switch between the letters and the results).
 
 ## If something goes wrong
 

@@ -12,7 +12,9 @@
 //! - `home.rs`, `library.rs`, `details.rs`, `franchises.rs`, `stats.rs`,
 //!   `profile.rs`, `shop.rs`, `settings.rs`: one screen each.
 //! - `dialogs.rs`: the pop-up windows.
+//! - `couch.rs`: Couch Mode, the full-screen controller-friendly view.
 
+mod couch;
 mod details;
 mod dialogs;
 mod franchises;
@@ -50,6 +52,8 @@ use crate::text::{short_playtime, thousands};
 
 /// How long a shop preview lasts, in seconds.
 const PREVIEW_SECS: f64 = 10.0;
+/// Setting: "1" to open straight into Couch Mode.
+const COUCH_KEY: &str = "ui.start_couch";
 /// Setting: "0" to stop the backgrounds moving.
 const ANIMATE_KEY: &str = "ui.animate";
 
@@ -248,6 +252,12 @@ pub struct GameLibApp {
     forced_backdrop: Option<Backdrop>,
     /// This PC's specs, read once in the background at startup.
     specs: std::sync::Arc<std::sync::Mutex<Option<PcSpecs>>>,
+    /// Couch Mode, while it's open.
+    couch: Option<couch::Couch>,
+    /// Set when Couch Mode was opened at startup and still needs full screen.
+    couch_fullscreen_pending: bool,
+    /// Game controllers.
+    pad: couch::Pad,
     /// Whether the backgrounds move.
     animate: bool,
     /// The clock the backgrounds are drawn at this frame, or `None` when
@@ -257,7 +267,9 @@ pub struct GameLibApp {
 
 /// Open the window and run until it is closed.
 pub fn run(start_screen: Option<&str>) -> Result<()> {
-    let screen = match start_screen {
+    // `gamelib ui couch` opens straight into Couch Mode.
+    let start_couch = start_screen == Some("couch");
+    let screen = match start_screen.filter(|name| *name != "couch") {
         Some(name) => {
             Screen::parse(name).ok_or_else(|| anyhow::anyhow!("unknown screen '{name}'"))?
         }
@@ -292,14 +304,14 @@ pub fn run(start_screen: Option<&str>) -> Result<()> {
             // screen updates even if the mouse isn't moving.
             let ctx = cc.egui_ctx.clone();
             let worker = Worker::spawn(config, move || ctx.request_repaint())?;
-            Ok(Box::new(GameLibApp::new(db, worker, screen)?))
+            Ok(Box::new(GameLibApp::new(db, worker, screen, start_couch)?))
         }),
     )
     .map_err(|err| anyhow::anyhow!("the window couldn't be opened: {err}"))
 }
 
 impl GameLibApp {
-    fn new(db: Db, worker: Worker, screen: Screen) -> Result<GameLibApp> {
+    fn new(db: Db, worker: Worker, screen: Screen, start_couch: bool) -> Result<GameLibApp> {
         // Count any playtime left over from a crash, and make sure the
         // profile exists.
         db.recover_unfinished_sessions()?;
@@ -335,6 +347,9 @@ impl GameLibApp {
             data: Data::load(&db, Filter::All, "", SortBy::LastPlayed)?,
             animate: db.get_bool_setting(ANIMATE_KEY, true)?,
             anim_time: None,
+            couch: None,
+            couch_fullscreen_pending: false,
+            pad: couch::Pad::new(),
             settings,
             db,
             worker,
@@ -355,6 +370,11 @@ impl GameLibApp {
             preview: None,
             forced_backdrop,
         };
+        if start_couch || app.db.get_bool_setting(COUCH_KEY, false)? {
+            // Full screen is asked for on the first frame (there's no window yet).
+            app.couch = Some(couch::Couch::new());
+            app.couch_fullscreen_pending = true;
+        }
         if app.db.get_bool_setting(keys::SCAN_ON_STARTUP, false)? {
             // The scan looks for artwork itself when it finishes.
             app.start_job(Job::ScanLibrary, "Scanning for games…");
@@ -680,6 +700,23 @@ impl GameLibApp {
                     self.go(screen);
                 }
             }
+
+            // Couch Mode, at the bottom of the rail.
+            ui.add_space(10.0);
+            let (rect, response) = ui.allocate_exact_size(vec2(54.0, 54.0), Sense::click());
+            if response.hovered() {
+                ui.painter()
+                    .rect_filled(rect, 14.0, theme.panel_alt.gamma_multiply(0.5));
+            }
+            paint::icon(ui.painter(), Icon::Couch, rect.center(), theme.muted);
+            if response
+                .on_hover_text("Couch Mode: full screen, for a TV and controller (F11)")
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                let ctx = ui.ctx().clone();
+                self.enter_couch(&ctx);
+            }
         });
     }
 
@@ -767,6 +804,26 @@ impl eframe::App for GameLibApp {
             self.theme = theme;
             self.theme_applied = true;
             theme.apply(&ctx);
+        }
+
+        // Controllers, and Couch Mode, which takes over the whole window.
+        let pad_input = self.pad.poll(time);
+        if std::mem::take(&mut self.couch_fullscreen_pending) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+        }
+        if let Some(couch) = &self.couch {
+            let input = pad_input.merge(couch::keyboard_input(&ctx, couch.typing()));
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ui, |ui| self.couch_screen(ui, input));
+            return;
+        }
+        if pad_input.start || ctx.input(|i| i.key_pressed(egui::Key::F11)) {
+            self.enter_couch(&ctx);
+        }
+        if self.pad.connected() {
+            // Look for the controller's Start button now and then.
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
         // Background first, then the panels on top of it. An animated

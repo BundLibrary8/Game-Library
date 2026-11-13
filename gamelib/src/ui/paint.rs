@@ -607,10 +607,23 @@ fn note_failed_picture(path: &std::path::Path, err: &impl std::fmt::Display) {
 /// can't be shown (still loading, or unreadable), so the caller can draw
 /// something in its place.
 pub fn file_image(ui: &Ui, path: &std::path::Path, rect: Rect, radius: f32) -> bool {
+    file_image_tinted(ui, path, rect, radius, Color32::WHITE)
+}
+
+/// Like [`file_image`], with the picture coloured or faded by `tint`
+/// (white leaves it as it is; a see-through white fades it).
+pub fn file_image_tinted(
+    ui: &Ui,
+    path: &std::path::Path,
+    rect: Rect,
+    radius: f32,
+    tint: Color32,
+) -> bool {
     if !path.is_file() {
         return false;
     }
     let image = egui::Image::from_uri(file_uri(path))
+        .tint(tint)
         .corner_radius(radius)
         .fit_to_exact_size(rect.size())
         .maintain_aspect_ratio(false);
@@ -1096,6 +1109,7 @@ pub enum Icon {
     Stats,
     Shop,
     Settings,
+    Couch,
 }
 
 pub fn icon(painter: &egui::Painter, icon: Icon, centre: Pos2, colour: Color32) {
@@ -1134,6 +1148,13 @@ pub fn icon(painter: &egui::Painter, icon: Icon, centre: Pos2, colour: Color32) 
             }
         }
         Icon::Shop => star4(painter, centre, 10.0, colour),
+        Icon::Couch => {
+            // A television on a stand.
+            let screen = Rect::from_center_size(p(0.0, -2.0), vec2(20.0, 13.0));
+            painter.rect_stroke(screen, 2.5, stroke, egui::StrokeKind::Middle);
+            painter.line_segment([p(-5.0, 8.5), p(5.0, 8.5)], stroke);
+            painter.line_segment([p(0.0, 4.5), p(0.0, 8.5)], stroke);
+        }
         Icon::Settings => {
             painter.circle_stroke(centre, 5.0, stroke);
             for i in 0..8 {
