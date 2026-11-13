@@ -38,6 +38,12 @@ pub struct CloudState {
     pub anon_key: String,
     pub message: Option<String>,
     pub search: String,
+    /// The full-window log-in screen is showing.
+    pub login_screen: bool,
+    /// When the log-in screen's entrance started.
+    pub login_shown_at: Option<f64>,
+    /// The email box has been given the keyboard once.
+    pub login_focused: bool,
     pub display_name: String,
     pub bio: String,
 }
@@ -57,6 +63,14 @@ impl GameLibApp {
             .map(|p| !p.anon_key.is_empty())
             .unwrap_or(false);
         let logged_in = self.db.cloud_session().ok().flatten().is_some();
+        // Open on the log-in screen, unless it has been turned off.
+        let skip = self
+            .db
+            .get_setting(super::login::SKIP_KEY)
+            .ok()
+            .flatten()
+            .is_some_and(|v| v == "1");
+        self.cloud.login_screen = ready && !skip;
         if ready && logged_in {
             self.cloud_job(CloudJob::Check, "Checking your GameLib account…");
         } else {
@@ -75,13 +89,23 @@ impl GameLibApp {
                     self.cloud.bio = profile.bio.clone();
                 }
                 let logged_in = account.is_some();
+                let was_logged_in = self.cloud.account.is_some();
                 self.cloud.account = account;
                 self.cloud.password.clear();
+                if logged_in {
+                    self.cloud.login_screen = false;
+                }
                 if logged_in && first {
                     self.start_job(Job::Cloud(CloudJob::Friends), "Loading your friends…");
                     self.start_job(Job::Cloud(CloudJob::Share), "Sharing your library…");
                 }
                 if !logged_in {
+                    // Logged out: back to the log-in screen.
+                    if was_logged_in {
+                        self.cloud.login_screen = true;
+                        self.cloud.login_shown_at = None;
+                        self.cloud.login_focused = false;
+                    }
                     self.cloud.friends = None;
                     self.cloud.viewing = None;
                     self.cloud.libraries.clear();
@@ -251,32 +275,40 @@ impl GameLibApp {
                 );
             }
         });
-        if submit && !self.cloud.busy {
-            let email = self.cloud.email.trim().to_string();
-            let password = Secret(self.cloud.password.clone());
-            let check = gamelib::cloud::check_email(&email).and_then(|()| match self.cloud.mode {
-                FormMode::SignUp => gamelib::cloud::check_username(&self.cloud.username)
-                    .and_then(|()| gamelib::cloud::check_password(&password.0)),
-                FormMode::LogIn => Ok(()),
-            });
-            match check {
-                Err(err) => self.cloud.message = Some(format!("{err}")),
-                Ok(()) => match self.cloud.mode {
-                    FormMode::SignUp => self.cloud_job(
-                        CloudJob::SignUp {
-                            username: self.cloud.username.trim().to_string(),
-                            email,
-                            password,
-                        },
-                        "Creating your account…",
-                    ),
-                    FormMode::LogIn => {
-                        self.cloud_job(CloudJob::LogIn { email, password }, "Logging in…")
-                    }
-                },
-            }
+        if submit {
+            self.cloud_submit();
         }
         false
+    }
+
+    /// Check the log-in / sign-up form and send it.
+    pub fn cloud_submit(&mut self) {
+        if self.cloud.busy {
+            return;
+        }
+        let email = self.cloud.email.trim().to_string();
+        let password = Secret(self.cloud.password.clone());
+        let check = gamelib::cloud::check_email(&email).and_then(|()| match self.cloud.mode {
+            FormMode::SignUp => gamelib::cloud::check_username(&self.cloud.username)
+                .and_then(|()| gamelib::cloud::check_password(&password.0)),
+            FormMode::LogIn => Ok(()),
+        });
+        match check {
+            Err(err) => self.cloud.message = Some(format!("{err}")),
+            Ok(()) => match self.cloud.mode {
+                FormMode::SignUp => self.cloud_job(
+                    CloudJob::SignUp {
+                        username: self.cloud.username.trim().to_string(),
+                        email,
+                        password,
+                    },
+                    "Creating your account…",
+                ),
+                FormMode::LogIn => {
+                    self.cloud_job(CloudJob::LogIn { email, password }, "Logging in…")
+                }
+            },
+        }
     }
 
     /// The account screen.

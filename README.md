@@ -246,8 +246,13 @@ Accounts are stored in the project's Supabase database
 (`https://ynjmutmaslrabyeucvzk.supabase.co`).
 
 **Nothing to set up.** The database is already set up and the project's
-key is built into GameLib. Open **Friends → GameLib friends**, then
-**Create an account** (username, email and password) or **Log in**.
+key is built into GameLib. GameLib opens on its log-in screen: **Log in**,
+or switch to **Create account** (username, email and password). Once
+you're logged in, it remembers you and goes straight to your library the
+next time. **Continue without an account** goes into the app without
+logging in (everything except GameLib friends works), and **Don't open on
+this screen** stops it showing at startup. You can still log in later from
+**Friends → GameLib friends**. Logging out brings the log-in screen back.
 
 New accounts get a confirmation email. Click the link in it, then log in.
 The page the link opens afterwards may not load, but the account is
