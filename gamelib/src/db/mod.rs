@@ -130,6 +130,9 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE games ADD COLUMN requirements_min TEXT;
     ALTER TABLE games ADD COLUMN requirements_rec TEXT;
     ",
+    // v5: when artwork was last looked for online, so games with none
+    // anywhere aren't looked up again on every start
+    "ALTER TABLE games ADD COLUMN art_checked_at INTEGER;",
 ];
 
 /// A connection to the library database.

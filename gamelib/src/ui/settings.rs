@@ -118,7 +118,7 @@ impl GameLibApp {
                     }
                 }
                 if ui.button("Download missing covers").clicked() {
-                    self.start_job(Job::FetchMissingCovers, "Getting covers and info…");
+                    self.start_job(Job::FetchMissingCovers { retry_all: true }, "Getting covers and info…");
                 }
             });
         });

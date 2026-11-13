@@ -333,7 +333,10 @@ impl GameLibApp {
                 if let Some(id) = self.check(self.db.add_manual_game(&title, &exe, now())) {
                     self.status = format!("Added {}.", title.trim());
                     self.go(Screen::Details(id));
-                    self.start_job(Job::FetchMissingCovers, "Getting covers and info…");
+                    self.start_job(
+                        Job::FetchMissingCovers { retry_all: false },
+                        "Getting covers and info…",
+                    );
                 }
             }
             Dialog::Rename { game_id, title } => {

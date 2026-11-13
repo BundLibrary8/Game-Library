@@ -69,12 +69,17 @@ cargo run
 ## First steps in the app
 
 1. Press **Scan** (top right of the Library) to find your Steam, Epic and
-   GOG games. Covers and icons are fetched straight afterwards.
+   GOG games.
 2. For games that aren't in a launcher, use **+ Add game**, or add a
    folder under **Settings → Folders to scan** and use **Scan → Scan my
    game folders**.
 3. Click a game to open its page. Press **Launch** to play; playtime is
    tracked automatically.
+
+Artwork is found automatically, every time the app starts and after every
+scan, with no key needed. Watch the bar at the bottom for progress. It
+needs an internet connection the first time; if you are offline it tries
+again next start.
 
 The icons down the left are Profile, Home, Library, Franchises, Stats,
 Shop and Settings.
@@ -86,7 +91,7 @@ Shop and Settings.
 | `cargo` is not recognised | Rust isn't installed, or PowerShell was open while it installed. Install it from <https://rustup.rs>, then open a **new** PowerShell window. |
 | The window doesn't open | Run `$env:GAMELIB_RENDERER = "glow"` and then `cargo run` again. |
 | It still looks like an old version | Run the four commands under *Get the latest version*. Make sure you start it with `cargo run`, not an old `gamelib.exe`. |
-| No covers appear | Press **Scan**, or **Settings → Download missing covers**. Covers for non-Steam games need a free SteamGridDB key, entered in Settings. |
+| No covers appear | Check you are online, then restart the app or use **Settings → Download missing covers**. A game that isn't on Steam under the same name needs a free SteamGridDB key, entered in Settings. |
 | A build error mentions `link.exe` | The Visual Studio C++ Build Tools are missing. Run the Rust installer again and accept them. |
 
 ## Optional settings
