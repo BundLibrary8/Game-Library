@@ -138,12 +138,6 @@ impl GameLibApp {
         );
         add("Mod library".into(), "Go to", Command::Go(Screen::Mods), 8);
         add(
-            "Game Room".into(),
-            "Go to",
-            Command::Go(Screen::GameRoom),
-            8,
-        );
-        add(
             "Devices and Bluetooth".into(),
             "Go to",
             Command::Go(Screen::Devices),

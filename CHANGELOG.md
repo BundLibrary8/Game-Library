@@ -22,7 +22,6 @@ before tagging a release.
   summaries to a channel through a webhook.
 - Mod library: every game's mods, switch on and off, install from zip, file
   or folder, remove.
-- Game Room: a virtual gaming room built from your library.
 - Achievement tracker: Steam achievements (with rarity) and your own
   checklists for any game.
 - Friends: what your Steam friends own and play, what's popular among them,

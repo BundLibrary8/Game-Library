@@ -1183,7 +1183,6 @@ pub enum Icon {
     Devices,
     Friends,
     Mods,
-    Room,
 }
 
 pub fn icon(painter: &egui::Painter, icon: Icon, centre: Pos2, colour: Color32) {
@@ -1244,19 +1243,6 @@ pub fn icon(painter: &egui::Painter, icon: Icon, centre: Pos2, colour: Color32) 
             painter.rect_stroke(body, 2.0, stroke, egui::StrokeKind::Middle);
             painter.circle_filled(p(-1.0, -6.5), 3.0, colour);
             painter.circle_filled(p(7.0, 1.5), 3.0, colour);
-        }
-        Icon::Room => {
-            // A couch.
-            let seat = Rect::from_min_max(p(-9.0, 0.0), p(9.0, 5.0));
-            painter.rect_stroke(seat, 2.0, stroke, egui::StrokeKind::Middle);
-            painter.line(
-                vec![p(-7.0, 0.0), p(-7.0, -6.0), p(7.0, -6.0), p(7.0, 0.0)],
-                stroke,
-            );
-            painter.line_segment([p(-11.0, -2.0), p(-11.0, 5.0)], stroke);
-            painter.line_segment([p(11.0, -2.0), p(11.0, 5.0)], stroke);
-            painter.line_segment([p(-8.0, 5.0), p(-8.0, 8.0)], stroke);
-            painter.line_segment([p(8.0, 5.0), p(8.0, 8.0)], stroke);
         }
         Icon::Devices => {
             // A mouse.

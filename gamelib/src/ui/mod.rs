@@ -29,7 +29,6 @@ mod franchises;
 mod friends_screen;
 mod game_extras;
 mod game_more;
-mod game_room;
 mod health;
 mod home;
 mod library;
@@ -194,8 +193,6 @@ pub enum Screen {
     Friends,
     /// Every game's mods.
     Mods,
-    /// The virtual gaming room.
-    GameRoom,
     /// Your GameLib account (log in, sign up, sharing).
     Account,
     Franchises,
@@ -220,7 +217,6 @@ impl Screen {
             "achievements" => Screen::Achievements,
             "friends" => Screen::Friends,
             "mods" => Screen::Mods,
-            "room" => Screen::GameRoom,
             "account" => Screen::Account,
             "wrapped" => Screen::Wrapped(gamelib::patterns::year_of(now(), local_offset())),
             "profile" => Screen::Profile,
@@ -1170,7 +1166,6 @@ impl GameLibApp {
                     for (screen, icon, tip) in [
                         (Screen::Home, Icon::Home, "Home"),
                         (Screen::Library, Icon::Library, "Library"),
-                        (Screen::GameRoom, Icon::Room, "Game Room"),
                         (
                             Screen::Discover,
                             Icon::Discover,
@@ -1508,7 +1503,6 @@ impl GameLibApp {
                                     Screen::Achievements => self.tracker_screen(ui),
                                     Screen::Friends => self.friends_screen(ui),
                                     Screen::Mods => self.mod_library_screen(ui),
-                                    Screen::GameRoom => self.game_room_screen(ui),
                                     Screen::Account => self.account_screen(ui),
                                     Screen::Franchises => self.franchises_screen(ui),
                                     Screen::Stats => self.stats_screen(ui),
