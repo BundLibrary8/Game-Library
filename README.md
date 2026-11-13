@@ -254,9 +254,8 @@ logging in (everything except GameLib friends works), and **Don't open on
 this screen** stops it showing at startup. You can still log in later from
 **Friends → GameLib friends**. Logging out brings the log-in screen back.
 
-New accounts get a confirmation email. Click the link in it, then log in.
-The page the link opens afterwards may not load, but the account is
-confirmed anyway.
+There's no confirmation email: a new account is logged in as soon as it's
+made.
 
 **For whoever owns the Supabase project:**
 
@@ -266,12 +265,12 @@ confirmed anyway.
   libraries. Run it again after pulling a version that changes it. Open
   the project at <https://supabase.com/dashboard>, go to **SQL Editor** →
   **New query**, paste the whole file, and press **Run**.
-- **Instant sign-ups.** To stop new accounts needing the email link, go to
-  **Authentication** → **Sign In / Providers** → **Email** and switch off
-  **Confirm email**.
-- **The page after confirming.** It goes to the **Site URL**, which is
-  currently `http://localhost:3000`. Change it under **Authentication** →
-  **URL Configuration**.
+- **Email confirmation is off**, so accounts work straight away. To make
+  new accounts click an email link first, go to **Authentication** →
+  **Sign In / Providers** → **Email** and switch on **Confirm email**. Also
+  change the **Site URL** (currently `http://localhost:3000`) under
+  **Authentication** → **URL Configuration**, because that's where the
+  link goes after confirming.
 - **A different Supabase project.** Enter its key in **Settings → GameLib
   account**, or build it in instead of the default:
 
