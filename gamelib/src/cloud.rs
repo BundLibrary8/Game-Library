@@ -27,7 +27,12 @@ use crate::model::Game;
 
 /// The GameLib Supabase project.
 pub const DEFAULT_URL: &str = "https://ynjmutmaslrabyeucvzk.supabase.co";
-/// The anon key, if it was built in.
+/// The GameLib project's publishable key. It's meant to be built into
+/// apps: it only identifies the project, and Row Level Security (in
+/// `supabase/schema.sql`) decides what each logged-in account may see.
+pub const DEFAULT_ANON_KEY: &str = "sb_publishable_LhtUzejJ6vAsfgpWFUFKZw_RuJexWxG";
+/// A different key built in instead, with the GAMELIB_SUPABASE_ANON_KEY
+/// environment variable at build time.
 pub const BUILT_IN_ANON_KEY: Option<&str> = option_env!("GAMELIB_SUPABASE_ANON_KEY");
 
 const URL_KEY: &str = "cloud.url";
@@ -186,7 +191,7 @@ fn explain(status: u16, message: &str) -> String {
     if lower.contains("invalid login credentials") {
         "The email or password isn't right.".into()
     } else if lower.contains("email not confirmed") {
-        "Confirm your email first: Supabase sent you a link.".into()
+        "Confirm your email first: open the link Supabase emailed you (the page it opens afterwards may not load; that's fine), then log in.".into()
     } else if lower.contains("user already registered") {
         "There's already an account with that email. Log in instead.".into()
     } else if lower.contains("relation") && lower.contains("does not exist")
@@ -698,7 +703,7 @@ impl Db {
             .filter(|k| !k.trim().is_empty())
             .or_else(|| BUILT_IN_ANON_KEY.map(str::to_string))
             .or_else(|| std::env::var("GAMELIB_SUPABASE_ANON_KEY").ok())
-            .unwrap_or_default();
+            .unwrap_or_else(|| DEFAULT_ANON_KEY.to_string());
         Ok(Project { url, anon_key })
     }
 
