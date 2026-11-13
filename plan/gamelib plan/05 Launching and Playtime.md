@@ -10,6 +10,10 @@ Back to [[00 Home]] · Prev: [[04 Game Sources]] · Next: [[06 Metadata and Cove
 > [!warning] Draft
 > Not agreed yet.
 
+> [!info] Plan review, 13 Nov 2026
+> Built ✅ as described, with the changes listed in the README (launcher links opened with `rundll32 url.dll,FileProtocolHandler`; a session ends when the game was last seen; crash recovery ignores sessions active in the last 3 minutes). Not yet checked by hand: a full Steam/Epic session ([[09 Milestones]]).
+> **Known gaps for the long-term plan:** games whose exe runs *outside* the install folder (wrapper launchers, anti-cheat), possibly Xbox/`WindowsApps` titles, and play started outside GameLib. Planned: optional extra watch paths per installation (M13) and opt-in tracking of games started elsewhere (M15). With several installations per game, the Play button uses the **preferred installation** ([[20 Game Identity and Installation Model#Launching with several installations]]). Rewards will use idle-filtered time ([[26 Progression and Stardust Economy]]).
+
 ## Launching (`launcher.rs`)
 ```rust
 match &game.launch {

@@ -10,6 +10,10 @@ Back to [[00 Home]] · Related: [[17 Shop]] · [[03 Data Model]] · [[09 Milesto
 > [!warning] Draft, and it changes an earlier assumption
 > [[01 Requirements]] said "no accounts, no friends". A profile is still **local** (it lives on your PC), but a **friends list needs data from the internet**. The options are below, with a recommendation.
 
+> [!info] Plan review, 13 Nov 2026
+> Built ✅ as described (local profile, earned banners, read-only Steam friends cached in `friends_cache`). The live Steam Web API call hasn't been tried yet ([[09 Milestones]]).
+> **Long term:** Option 2 below ("GameLib-to-GameLib friends") is no longer "never": it becomes **optional** GameLib accounts in Phase 4, designed in [[23 Social Platform Architecture]] with the backend options in [[24 Backend and Cloud Infrastructure]]. The local profile keeps working without an account. A cheap first step with no server is a **shareable profile card** (Phase 3). Typing a SteamID proves nothing, so public profiles will verify it with "Sign in through Steam".
+
 ## Mockups
 ![[gamelib-06-profile.png]]
 ![[gamelib-07-edit-profile.png]]

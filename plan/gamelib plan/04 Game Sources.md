@@ -1,14 +1,21 @@
 ---
 tags: [gamelib, design]
-status: draft-needs-review
+status: built (live checks pending) + planned sources
 section: 3
+updated: 2026-11-13
 ---
-# 04 Game Sources (Section 3, draft)
+# 04 Game Sources (Section 3)
 
 Back to [[00 Home]] · Prev: [[03 Data Model]] · Next: [[05 Launching and Playtime]]
 
-> [!warning] Draft
-> Not agreed yet. The file locations below are where these launchers normally store data. **Check them on your own PC** before relying on them.
+> [!info] Plan review, 13 Nov 2026: what changed on this page
+> - Was marked "draft"; everything in the original sections below is **built** ✅ (code + fixture tests). Live checks still pending: **GOG** registry and **Epic launch links** ([[09 Milestones]]).
+> - Added: [[#Epic fallback: finding games by their folders (built, uncommitted)]], which was in the code but not in the plan.
+> - Added: [[#Planned sources (Phase 1)]] and a pointer to the full research in [[27 Future Integrations]].
+> - The trait below becomes `LibraryProvider` in Phase 1 ([[21 Provider Architecture]]). Change notes: [[18 Plan Review 2026-11-13]].
+
+> [!warning] Original note (still true)
+> The file locations below are where these launchers normally store data. **Check them on your own PC** before relying on them.
 
 ## One trait, many sources
 ```rust
@@ -61,3 +68,26 @@ pub trait GameSource {
 - Runs on the worker thread (see [[02 Architecture]]).
 - Updates existing rows by `(source, source_id)` and adds new ones. Games that have disappeared are marked "not installed" and are never deleted. See [[03 Data Model]].
 - Option: a "scan on startup" setting.
+
+## Epic fallback: finding games by their folders (built, uncommitted)
+✅ in `sources/epic_folders.rs` (617 lines with tests), added while testing on my PC; **not yet committed** to Git.
+- **Why:** on some PCs the Epic launcher never writes the `.item` manifests (its log says "Failed to save install info"), so the manifest scan finds nothing even though games are installed.
+- **How:** every Epic install has a hidden `.egstore` folder with the binary **build manifest**. The fallback (1) looks for `.egstore` folders in the usual Epic library folders, (2) reads the launch exe from the manifest header (with strict size limits, errors instead of panics), (3) looks the game up in the launcher's own settings `.ini` to get the namespace/item id/app name for the launch link.
+- If step 3 finds nothing, the game is launched by running its exe directly.
+- Results are merged with the manifest scan so a game found both ways appears once.
+- Tests: corrupt manifests, the ini parser, matching. 🔬 To verify live: that launching via the exe still works for games that need the Epic launcher for DRM/online.
+
+## Planned sources (Phase 1)
+> [!todo] 🔜 Planned in [[28 Expanded Development Roadmap#M13: More stores (M, plus time-boxed spikes)]]. Not built. Confidence levels and sources in [[27 Future Integrations#Stores and libraries]].
+
+| Source | How (expected) | Confidence | Plan |
+|---|---|---|---|
+| **Ubisoft Connect** | Registry `HKLM\SOFTWARE\WOW6432Node\Ubisoft\Launcher\Installs\<id>` → install dir; launch `uplay://launch/<id>/0` | 🟡 community-documented | Build in M13 |
+| **Installed programs** | Uninstall registry entries + Start Menu shortcuts → the existing **import review** screen (guesses, so a person confirms) | 🟡 | Build in M13 |
+| **EA app** | `ProgramData\EA Desktop\InstallData`; launch URI unclear | 🔬 | 2-session spike; fallback = folder scan |
+| **Xbox / Microsoft Store** | Windows `PackageManager` API, `XboxGames` folders, `shell:AppsFolder` launch | 🔬 | 2-session spike; playtime tracking may not work for `WindowsApps` |
+| **GOG Galaxy database** | Read-only `galaxy-2.0.db` (all Galaxy integrations) | 🔬 undocumented | Spike; "experimental" only |
+| **Steam owned games** | Steam Web API `GetOwnedGames` | 🟢 official | M14: owned-not-installed + Steam playtime |
+| Battle.net, Amazon, itch.io | Local files/DBs | 🔬 | Later (Phase 6) |
+
+With the Phase 1 data model, each of these produces **installations and ownerships** attached to a canonical game instead of a new `games` row per store ([[20 Game Identity and Installation Model#Matching: how scans decide "same game or new game?"]]).

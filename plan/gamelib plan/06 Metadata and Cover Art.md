@@ -10,6 +10,10 @@ Back to [[00 Home]] · Prev: [[05 Launching and Playtime]] · Next: [[07 UI Scre
 > [!warning] Draft
 > Not agreed yet. Check the API details against the official docs before coding.
 
+> [!info] Plan review, 13 Nov 2026
+> Everything on this page is **built** ✅; the live SteamGridDB and Steam Store calls still need checking with a real key ([[09 Milestones]]).
+> **Planned next (Phase 1, M12):** IGDB becomes the metadata source for non-Steam games, plus hero/logo artwork and cross-store IDs used for duplicate detection. Metadata moves to its own tables and behind a `MetadataProvider` trait. See [[20 Game Identity and Installation Model]], [[21 Provider Architecture]], [[27 Future Integrations#Metadata and artwork]] (IGDB: 4 requests/second, terms to read before any public release).
+
 ## Where it comes from
 | What | Source | Key needed? |
 |---|---|---|

@@ -12,6 +12,9 @@ A shop for **cosmetics**: library backgrounds, profile banners, badges and name 
 > [!important] Proposal: pay with Stardust earned by playing, not real money
 > The shop uses **Stardust ✦**, a points currency you **earn by playing your games** (tracked by [[05 Launching and Playtime]]). This makes it a reward system. **Real-money purchases are out of scope.** The reasons are in the table below.
 
+> [!info] Plan review, 13 Nov 2026
+> Built ✅ as described. **Stardust stays**, still cosmetic-only with no real money. Proposed expansion (XP and levels, idle filter and daily cap on playtime rewards, themes, profile layouts, server-side ledger once accounts exist) is in [[26 Progression and Stardust Economy]]. The review found two small exploits in today's rules (idle playtime pays without limit; deleting and re-adding a game lets "finished" pay twice), both listed there.
+
 ## Mockup
 ![[gamelib-08-shop.png]]
 
