@@ -29,6 +29,7 @@ pub mod backlog;
 pub mod backup;
 pub mod csvio;
 pub mod db;
+pub mod devices;
 pub mod extras;
 pub mod friends;
 pub mod hardware;

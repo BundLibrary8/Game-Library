@@ -59,6 +59,10 @@ pub enum Job {
     MeasureDisk,
     /// Ask GitHub whether a newer GameLib has been released.
     CheckForUpdates,
+    /// List the connected peripherals and paired Bluetooth devices.
+    ScanDevices,
+    /// Connect or disconnect a paired Bluetooth device.
+    SetBluetooth { address: u64, connect: bool },
     /// Find covers, icons and store info for games that lack them. Games
     /// looked up recently without luck are skipped unless `retry_all`.
     FetchMissingCovers { retry_all: bool },
@@ -159,6 +163,18 @@ pub enum WorkerResult {
     },
     /// The result of checking for a newer version.
     UpdateChecked(Result<crate::updates::UpdateCheck, String>),
+    /// What's plugged in, and the paired Bluetooth devices (or why they
+    /// couldn't be listed).
+    DevicesFound {
+        devices: Result<Vec<crate::devices::Device>, String>,
+        bluetooth: Result<Vec<crate::devices::BtDevice>, String>,
+    },
+    /// A Bluetooth device was connected or disconnected (or wasn't).
+    BluetoothChanged {
+        address: u64,
+        connect: bool,
+        result: Result<(), String>,
+    },
     /// Something went wrong. Show `message` in the status bar; the app
     /// carries on.
     Error {
@@ -347,6 +363,8 @@ impl WorkerState {
             Job::AskClaude { .. } => "Couldn't ask Claude".to_string(),
             Job::MeasureDisk => "Couldn't measure disk use".to_string(),
             Job::CheckForUpdates => "Couldn't check for updates".to_string(),
+            Job::ScanDevices => "Couldn't list devices".to_string(),
+            Job::SetBluetooth { .. } => "Bluetooth".to_string(),
             Job::Shutdown => return,
         };
         let outcome = match job {
@@ -355,6 +373,31 @@ impl WorkerState {
             Job::Import(games) => self.import(&games),
             Job::Launch { game_id, profile } => self.launch(game_id, profile),
             Job::MeasureDisk => self.measure_disk(),
+            Job::ScanDevices => {
+                let devices = crate::devices::list_devices().map_err(|e| format!("{e:#}"));
+                let bluetooth = crate::devices::bluetooth_devices().map_err(|e| format!("{e:#}"));
+                self.reporter
+                    .send(WorkerResult::DevicesFound { devices, bluetooth });
+                Ok(())
+            }
+            Job::SetBluetooth { address, connect } => {
+                // Connecting can take several seconds; don't hold up other jobs.
+                let reporter = self.reporter.clone();
+                (|| -> Result<()> {
+                    thread::Builder::new()
+                        .name("gamelib-bluetooth".into())
+                        .spawn(move || {
+                            let result = crate::devices::set_bluetooth_connected(address, connect)
+                                .map_err(|e| format!("{e:#}"));
+                            reporter.send(WorkerResult::BluetoothChanged {
+                                address,
+                                connect,
+                                result,
+                            });
+                        })?;
+                    Ok(())
+                })()
+            }
             Job::CheckForUpdates => {
                 let result = crate::updates::check().map_err(|err| format!("{err:#}"));
                 self.reporter.send(WorkerResult::UpdateChecked(result));

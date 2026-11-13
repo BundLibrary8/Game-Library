@@ -6,6 +6,8 @@ before tagging a release.
 
 ## [0.2.0]
 
+- Devices page: connected peripherals grouped by kind, controller
+  batteries, and paired Bluetooth devices with Connect / Disconnect.
 - Launch profiles: named sets of launch options per game (including Steam
   games), picked with ▾ next to Launch.
 - Library health: install checks, disk space per drive, the biggest

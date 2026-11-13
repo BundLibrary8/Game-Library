@@ -100,6 +100,21 @@ pub fn open_link(url: &str) -> Result<()> {
     Ok(())
 }
 
+/// Open Windows' Bluetooth settings page.
+pub fn open_bluetooth_settings() -> Result<()> {
+    anyhow::ensure!(
+        cfg!(windows),
+        "Bluetooth settings can only be opened on Windows"
+    );
+    uri_command("ms-settings:bluetooth")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("couldn't open Bluetooth settings")?;
+    Ok(())
+}
+
 fn uri_command(uri: &str) -> Command {
     if cfg!(windows) {
         // rundll32 rather than `cmd /C start`: cmd treats the `&` in Epic's

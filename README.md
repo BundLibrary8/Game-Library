@@ -84,7 +84,7 @@ needs an internet connection the first time; if you are offline it tries
 again next start.
 
 The icons down the left are Profile, Home, Library, Discover, Assistant,
-Franchises, Stats, Shop, Library health and Settings. The TV icon at the bottom opens
+Franchises, Stats, Shop, Library health, Devices and Settings. The TV icon at the bottom opens
 **Couch Mode**.
 
 ### What's where
@@ -140,6 +140,20 @@ and **Ctrl +/-** (text size).
 The heartbeat icon checks every game: missing exes or folders, missing
 covers, duplicates. It shows free space on each drive and, after **Measure
 disk space**, how big each game is.
+
+### Devices
+
+The mouse icon lists everything connected to the PC, grouped by kind:
+controllers (with battery level), keyboards, mice, audio, cameras,
+monitors, drives and printers. A device with a problem is marked in red.
+It refreshes by itself every 20 seconds.
+
+The **Bluetooth** section lists the devices paired with this PC, whether
+each is connected, and a **Connect** / **Disconnect** button. A device
+has to be switched on and nearby to connect. New devices are paired in
+Windows' own Bluetooth settings (there's a button for it). Bluetooth LE-only
+devices, like some mice and fitness trackers, don't appear here; manage
+them in Windows' settings.
 
 ### Other settings
 

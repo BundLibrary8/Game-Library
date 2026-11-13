@@ -118,6 +118,12 @@ impl GameLibApp {
             add(name.to_string(), "Go to", Command::Go(screen), 8);
         }
         add("Profile".into(), "Go to", Command::Go(Screen::Profile), 8);
+        add(
+            "Devices and Bluetooth".into(),
+            "Go to",
+            Command::Go(Screen::Devices),
+            8,
+        );
         add("Admin panel".into(), "Go to", Command::Go(Screen::Admin), 0);
         add("Scan for games".into(), "Action", Command::Scan, 6);
         add("Add a game".into(), "Action", Command::AddGame, 6);

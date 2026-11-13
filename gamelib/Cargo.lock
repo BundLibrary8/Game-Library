@@ -1526,6 +1526,7 @@ dependencies = [
  "tempfile",
  "tray-icon",
  "walkdir",
+ "windows-sys 0.61.2",
  "winreg",
 ]
 

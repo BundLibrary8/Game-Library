@@ -1154,6 +1154,7 @@ pub enum Icon {
     Discover,
     Assistant,
     Health,
+    Devices,
 }
 
 pub fn icon(painter: &egui::Painter, icon: Icon, centre: Pos2, colour: Color32) {
@@ -1192,6 +1193,13 @@ pub fn icon(painter: &egui::Painter, icon: Icon, centre: Pos2, colour: Color32) 
             }
         }
         Icon::Shop => star4(painter, centre, 10.0, colour),
+        Icon::Devices => {
+            // A mouse.
+            let body = Rect::from_center_size(p(0.0, 1.0), vec2(12.0, 18.0));
+            painter.rect_stroke(body, 6.0, stroke, egui::StrokeKind::Middle);
+            painter.line_segment([p(0.0, -8.0), p(0.0, -3.0)], stroke);
+            painter.line_segment([p(-6.0, -3.0), p(6.0, -3.0)], stroke);
+        }
         Icon::Health => {
             // A heartbeat line.
             painter.line(

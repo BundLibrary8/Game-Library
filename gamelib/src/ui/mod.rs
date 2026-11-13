@@ -19,6 +19,7 @@ mod admin;
 mod assistant;
 mod couch;
 mod details;
+mod devices;
 mod dialogs;
 mod discover;
 mod franchises;
@@ -103,6 +104,8 @@ pub enum Screen {
     Admin,
     /// Install checks, disk space and things to tidy up.
     Health,
+    /// Peripherals and Bluetooth devices.
+    Devices,
     Franchises,
     Stats,
     Profile,
@@ -121,6 +124,7 @@ impl Screen {
             "stats" => Screen::Stats,
             "admin" => Screen::Admin,
             "health" => Screen::Health,
+            "devices" => Screen::Devices,
             "wrapped" => Screen::Wrapped(gamelib::patterns::year_of(now(), local_offset())),
             "profile" => Screen::Profile,
             "shop" => Screen::Shop,
@@ -375,6 +379,8 @@ pub struct GameLibApp {
     game_page: game_more::GamePageState,
     /// The Ctrl+K command palette.
     palette: palette::Palette,
+    /// What the Devices screen found.
+    devices: devices::DevicesState,
     /// Notification settings shared with the worker threads.
     shared: notify::Shared,
     /// Pop-ups in the corner of the window.
@@ -515,6 +521,7 @@ impl GameLibApp {
             admin: admin::AdminState::default(),
             game_page: game_more::GamePageState::default(),
             palette: palette::Palette::default(),
+            devices: devices::DevicesState::default(),
             shared,
             toasts: Vec::new(),
             tray: None,
@@ -773,6 +780,17 @@ impl GameLibApp {
                     self.job_done();
                     self.status = format!("Friends updated ({}).", friends.len());
                 }
+                WorkerResult::DevicesFound { devices, bluetooth } => {
+                    self.devices_found(devices, bluetooth);
+                }
+                WorkerResult::BluetoothChanged {
+                    address,
+                    connect,
+                    result,
+                } => {
+                    self.job_done();
+                    self.bluetooth_changed(address, connect, result);
+                }
                 WorkerResult::DiskProgress { done, total } => {
                     self.status = format!("Measuring disk space… {done} of {total}");
                 }
@@ -894,99 +912,116 @@ impl GameLibApp {
             egui::StrokeKind::Inside,
         );
 
-        ui.vertical_centered(|ui| {
-            ui.spacing_mut().item_spacing.y = 8.0;
-            ui.add_space(34.0);
+        // Scrolls (without a visible bar) when the window is too short
+        // for every icon.
+        egui::ScrollArea::vertical()
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.spacing_mut().item_spacing.y = 8.0;
+                    ui.add_space(34.0);
 
-            // The orb: your profile.
-            let (rect, response) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::click());
-            let [r, g, b, _] = theme.accent.to_array();
-            paint::glow(
-                ui.painter(),
-                rect.center(),
-                34.0,
-                Color32::from_rgba_unmultiplied(r, g, b, 70),
-            );
-            paint::avatar(
-                ui,
-                rect.center(),
-                20.0,
-                &self.data.profile.display_name,
-                self.data.profile.avatar_path.as_deref(),
-                &theme,
-            );
-            if response
-                .on_hover_text("Profile")
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .clicked()
-            {
-                self.go(Screen::Profile);
-            }
-            ui.add_space(18.0);
-
-            for (screen, icon, tip) in [
-                (Screen::Home, Icon::Home, "Home"),
-                (Screen::Library, Icon::Library, "Library"),
-                (
-                    Screen::Discover,
-                    Icon::Discover,
-                    "Discover: your backlog and what to play",
-                ),
-                (
-                    Screen::Assistant,
-                    Icon::Assistant,
-                    "Assistant: ask about your library",
-                ),
-                (Screen::Franchises, Icon::Franchises, "Franchises"),
-                (Screen::Stats, Icon::Stats, "Stats"),
-                (Screen::Shop, Icon::Shop, "Shop"),
-                (Screen::Health, Icon::Health, "Library health"),
-                (Screen::Settings, Icon::Settings, "Settings"),
-            ] {
-                let selected = self.screen == screen
-                    || (screen == Screen::Library && matches!(self.screen, Screen::Details(_)))
-                    || (screen == Screen::Stats && matches!(self.screen, Screen::Wrapped(_)));
-                let (rect, response) = ui.allocate_exact_size(vec2(50.0, 50.0), Sense::click());
-                if selected {
-                    ui.painter().rect_filled(rect, 14.0, theme.panel_alt);
-                    ui.painter().rect_stroke(
-                        rect,
-                        14.0,
-                        Stroke::new(1.0, theme.accent.gamma_multiply(0.5)),
-                        egui::StrokeKind::Inside,
+                    // The orb: your profile.
+                    let (rect, response) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::click());
+                    let [r, g, b, _] = theme.accent.to_array();
+                    paint::glow(
+                        ui.painter(),
+                        rect.center(),
+                        34.0,
+                        Color32::from_rgba_unmultiplied(r, g, b, 70),
                     );
-                } else if response.hovered() {
-                    ui.painter()
-                        .rect_filled(rect, 14.0, theme.panel_alt.gamma_multiply(0.5));
-                }
-                let colour = if selected { theme.accent } else { theme.muted };
-                paint::icon(ui.painter(), icon, rect.center(), colour);
-                if response
-                    .on_hover_text(tip)
-                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .clicked()
-                {
-                    self.go(screen);
-                }
-            }
+                    paint::avatar(
+                        ui,
+                        rect.center(),
+                        20.0,
+                        &self.data.profile.display_name,
+                        self.data.profile.avatar_path.as_deref(),
+                        &theme,
+                    );
+                    if response
+                        .on_hover_text("Profile")
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                    {
+                        self.go(Screen::Profile);
+                    }
+                    ui.add_space(18.0);
 
-            // Couch Mode, at the bottom of the rail.
-            ui.add_space(10.0);
-            let (rect, response) = ui.allocate_exact_size(vec2(54.0, 54.0), Sense::click());
-            if response.hovered() {
-                ui.painter()
-                    .rect_filled(rect, 14.0, theme.panel_alt.gamma_multiply(0.5));
-            }
-            paint::icon(ui.painter(), Icon::Couch, rect.center(), theme.muted);
-            if response
-                .on_hover_text("Couch Mode: full screen, for a TV and controller (F11)")
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .clicked()
-            {
-                let ctx = ui.ctx().clone();
-                self.enter_couch(&ctx);
-            }
-        });
+                    for (screen, icon, tip) in [
+                        (Screen::Home, Icon::Home, "Home"),
+                        (Screen::Library, Icon::Library, "Library"),
+                        (
+                            Screen::Discover,
+                            Icon::Discover,
+                            "Discover: your backlog and what to play",
+                        ),
+                        (
+                            Screen::Assistant,
+                            Icon::Assistant,
+                            "Assistant: ask about your library",
+                        ),
+                        (Screen::Franchises, Icon::Franchises, "Franchises"),
+                        (Screen::Stats, Icon::Stats, "Stats"),
+                        (Screen::Shop, Icon::Shop, "Shop"),
+                        (Screen::Health, Icon::Health, "Library health"),
+                        (
+                            Screen::Devices,
+                            Icon::Devices,
+                            "Devices: peripherals and Bluetooth",
+                        ),
+                        (Screen::Settings, Icon::Settings, "Settings"),
+                    ] {
+                        let selected = self.screen == screen
+                            || (screen == Screen::Library
+                                && matches!(self.screen, Screen::Details(_)))
+                            || (screen == Screen::Stats
+                                && matches!(self.screen, Screen::Wrapped(_)));
+                        let (rect, response) =
+                            ui.allocate_exact_size(vec2(50.0, 50.0), Sense::click());
+                        if selected {
+                            ui.painter().rect_filled(rect, 14.0, theme.panel_alt);
+                            ui.painter().rect_stroke(
+                                rect,
+                                14.0,
+                                Stroke::new(1.0, theme.accent.gamma_multiply(0.5)),
+                                egui::StrokeKind::Inside,
+                            );
+                        } else if response.hovered() {
+                            ui.painter().rect_filled(
+                                rect,
+                                14.0,
+                                theme.panel_alt.gamma_multiply(0.5),
+                            );
+                        }
+                        let colour = if selected { theme.accent } else { theme.muted };
+                        paint::icon(ui.painter(), icon, rect.center(), colour);
+                        if response
+                            .on_hover_text(tip)
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
+                            self.go(screen);
+                        }
+                    }
+
+                    // Couch Mode, at the bottom of the rail.
+                    ui.add_space(10.0);
+                    let (rect, response) = ui.allocate_exact_size(vec2(54.0, 54.0), Sense::click());
+                    if response.hovered() {
+                        ui.painter()
+                            .rect_filled(rect, 14.0, theme.panel_alt.gamma_multiply(0.5));
+                    }
+                    paint::icon(ui.painter(), Icon::Couch, rect.center(), theme.muted);
+                    if response
+                        .on_hover_text("Couch Mode: full screen, for a TV and controller (F11)")
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                    {
+                        let ctx = ui.ctx().clone();
+                        self.enter_couch(&ctx);
+                    }
+                });
+            });
     }
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
@@ -1198,6 +1233,7 @@ impl eframe::App for GameLibApp {
                                     Screen::Wrapped(year) => self.wrapped_screen(ui, year),
                                     Screen::Admin => self.admin_screen(ui),
                                     Screen::Health => self.health_screen(ui),
+                                    Screen::Devices => self.devices_screen(ui),
                                     Screen::Franchises => self.franchises_screen(ui),
                                     Screen::Stats => self.stats_screen(ui),
                                     Screen::Profile => self.profile_screen(ui),
