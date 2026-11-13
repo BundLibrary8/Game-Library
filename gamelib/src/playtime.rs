@@ -140,6 +140,47 @@ pub fn is_running_in(watch_dir: &Path, running_exes: &[PathBuf]) -> bool {
     running_exes.iter().any(|exe| is_inside(exe, watch_dir))
 }
 
+/// What counts as "the game is running": an exe inside its folder, or an
+/// exe with a particular file name (set by hand for games whose process
+/// runs from somewhere else), or either.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Watch {
+    pub dir: Option<PathBuf>,
+    /// An exe file name like `eldenring.exe`. Compared ignoring case.
+    pub process_name: Option<String>,
+}
+
+impl Watch {
+    /// Watch a folder only.
+    pub fn folder(dir: impl Into<PathBuf>) -> Watch {
+        Watch {
+            dir: Some(dir.into()),
+            process_name: None,
+        }
+    }
+
+    /// Is there anything to watch at all?
+    pub fn is_empty(&self) -> bool {
+        self.dir.is_none() && self.process_name.is_none()
+    }
+
+    /// Is the game running, judging by these running exes?
+    pub fn matches(&self, running_exes: &[PathBuf]) -> bool {
+        if let Some(dir) = &self.dir
+            && is_running_in(dir, running_exes)
+        {
+            return true;
+        }
+        let Some(name) = &self.process_name else {
+            return false;
+        };
+        running_exes.iter().any(|exe| {
+            exe.file_name()
+                .is_some_and(|file| file.to_string_lossy().eq_ignore_ascii_case(name))
+        })
+    }
+}
+
 /// The exe path of every running process we're allowed to see.
 pub fn running_exes(system: &mut System) -> Vec<PathBuf> {
     system.refresh_processes_specifics(
@@ -208,13 +249,16 @@ impl Environment for SystemEnvironment {
 pub fn track(
     db: &Db,
     game_id: i64,
-    watch_dir: &Path,
+    watch: &Watch,
     timings: &Timings,
     env: &mut dyn Environment,
     mut on_event: impl FnMut(TrackEvent),
 ) -> Result<()> {
     // Compare like with like: the process list reports real, full paths.
-    let watch_dir = real_path(watch_dir);
+    let watch = Watch {
+        dir: watch.dir.as_deref().map(real_path),
+        process_name: watch.process_name.clone(),
+    };
     let mut state = TrackState::WaitingToStart {
         launched_at: env.now(),
     };
@@ -228,7 +272,7 @@ pub fn track(
         };
         env.sleep(Duration::from_secs(poll.max(1) as u64));
 
-        let running = is_running_in(&watch_dir, &env.running_exes());
+        let running = watch.matches(&env.running_exes());
         let (next, action) = step(state, running, env.now(), timings);
         state = next;
 
@@ -280,6 +324,27 @@ mod tests {
             last_seen,
             last_checkpoint,
         }
+    }
+
+    #[test]
+    fn a_watch_matches_by_folder_or_by_exe_name() {
+        let running = vec![
+            PathBuf::from("/other/place/EldenRing.exe"),
+            PathBuf::from("/games/ember/bin/ember.exe"),
+        ];
+        assert!(Watch::folder("/games/ember").matches(&running));
+        assert!(!Watch::folder("/games/rift").matches(&running));
+        let by_name = Watch {
+            dir: Some("/games/rift".into()),
+            process_name: Some("eldenring.exe".into()),
+        };
+        assert!(by_name.matches(&running), "names compare ignoring case");
+        let wrong = Watch {
+            dir: None,
+            process_name: Some("ring.exe".into()),
+        };
+        assert!(!wrong.matches(&running), "the whole file name must match");
+        assert!(Watch::default().is_empty());
     }
 
     #[test]
@@ -426,9 +491,14 @@ mod tests {
             game_runs: 10_020..10_620,
         };
         let mut events = Vec::new();
-        track(&db, game, Path::new("/games/ember"), &T, &mut env, |e| {
-            events.push(e)
-        })
+        track(
+            &db,
+            game,
+            &Watch::folder("/games/ember"),
+            &T,
+            &mut env,
+            |e| events.push(e),
+        )
         .unwrap();
 
         assert_eq!(events.len(), 2);
@@ -458,9 +528,14 @@ mod tests {
             game_runs: 0..0,
         };
         let mut events = Vec::new();
-        track(&db, game, Path::new("/games/ember"), &T, &mut env, |e| {
-            events.push(e)
-        })
+        track(
+            &db,
+            game,
+            &Watch::folder("/games/ember"),
+            &T,
+            &mut env,
+            |e| events.push(e),
+        )
         .unwrap();
 
         assert_eq!(events, [TrackEvent::GaveUp { game_id: game }]);

@@ -74,10 +74,19 @@ pub struct GameExtras {
     /// Minimum and recommended system requirements, as plain text.
     pub requirements_min: Option<String>,
     pub requirements_rec: Option<String>,
+    /// How long the game takes to beat, in minutes, as you entered it.
+    pub minutes_to_beat: Option<u32>,
+    /// Private notes: where you got to, tips, anything.
+    pub notes: Option<String>,
+    /// Your review of the game.
+    pub review: Option<String>,
+    /// The name of the game's exe (like `eldenring.exe`), for games whose
+    /// process doesn't run from their install folder.
+    pub process_name: Option<String>,
 }
 
 const EXTRA_COLUMNS: &str = "status, rating, franchise, franchise_order, save_dir, mods_dir,
-    requirements_min, requirements_rec";
+    requirements_min, requirements_rec, minutes_to_beat, notes, review, process_name";
 
 fn extras_from_row(row: &rusqlite::Row, first: usize) -> rusqlite::Result<GameExtras> {
     Ok(GameExtras {
@@ -91,6 +100,10 @@ fn extras_from_row(row: &rusqlite::Row, first: usize) -> rusqlite::Result<GameEx
         mods_dir: row.get::<_, Option<String>>(first + 5)?.map(PathBuf::from),
         requirements_min: row.get(first + 6)?,
         requirements_rec: row.get(first + 7)?,
+        minutes_to_beat: row.get(first + 8)?,
+        notes: row.get(first + 9)?,
+        review: row.get(first + 10)?,
+        process_name: row.get(first + 11)?,
     })
 }
 
@@ -182,6 +195,50 @@ impl Db {
         )?;
         Ok(())
     }
+
+    /// Set (or clear) how long the game takes to beat, in minutes.
+    pub fn set_minutes_to_beat(&self, game_id: i64, minutes: Option<u32>) -> Result<()> {
+        let minutes = minutes.filter(|m| *m > 0);
+        self.conn.execute(
+            "UPDATE games SET minutes_to_beat = ?2 WHERE id = ?1",
+            params![game_id, minutes],
+        )?;
+        Ok(())
+    }
+
+    /// Save your notes. Blank text clears them.
+    pub fn set_notes(&self, game_id: i64, notes: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE games SET notes = ?2 WHERE id = ?1",
+            params![game_id, blank_to_none(notes)],
+        )?;
+        Ok(())
+    }
+
+    /// Save your review. Blank text clears it.
+    pub fn set_review(&self, game_id: i64, review: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE games SET review = ?2 WHERE id = ?1",
+            params![game_id, blank_to_none(review)],
+        )?;
+        Ok(())
+    }
+
+    /// Set the exe name to watch for when tracking playtime, like
+    /// `eldenring.exe`. Only the file name is kept.
+    pub fn set_process_name(&self, game_id: i64, name: Option<&str>) -> Result<()> {
+        let name = blank_to_none(name)
+            .map(|name| name.rsplit(['/', '\\']).next().unwrap_or(name).to_string());
+        self.conn.execute(
+            "UPDATE games SET process_name = ?2 WHERE id = ?1",
+            params![game_id, name],
+        )?;
+        Ok(())
+    }
+}
+
+fn blank_to_none(text: Option<&str>) -> Option<&str> {
+    text.map(str::trim).filter(|t| !t.is_empty())
 }
 
 #[cfg(test)]
@@ -265,5 +322,29 @@ mod tests {
             (extras.status, extras.rating),
             (Some(Status::Finished), Some(5))
         );
+    }
+
+    #[test]
+    fn notes_reviews_lengths_and_process_names_are_kept() {
+        let (db, id) = db_with_game();
+        db.set_minutes_to_beat(id, Some(600)).unwrap();
+        db.set_notes(id, Some("  Got to the second boss  "))
+            .unwrap();
+        db.set_review(id, Some("Loved it")).unwrap();
+        db.set_process_name(id, Some(r"C:\Games\Ember\ember-win64.exe"))
+            .unwrap();
+        let extras = db.extras(id).unwrap();
+        assert_eq!(extras.minutes_to_beat, Some(600));
+        assert_eq!(extras.notes.as_deref(), Some("Got to the second boss"));
+        assert_eq!(extras.review.as_deref(), Some("Loved it"));
+        assert_eq!(extras.process_name.as_deref(), Some("ember-win64.exe"));
+
+        db.set_minutes_to_beat(id, Some(0)).unwrap();
+        db.set_notes(id, Some("   ")).unwrap();
+        db.set_process_name(id, None).unwrap();
+        let cleared = db.extras(id).unwrap();
+        assert_eq!(cleared.minutes_to_beat, None);
+        assert_eq!(cleared.notes, None);
+        assert_eq!(cleared.process_name, None);
     }
 }

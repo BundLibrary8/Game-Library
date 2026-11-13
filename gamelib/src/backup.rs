@@ -218,6 +218,14 @@ pub struct ExportedGame {
     pub franchise_order: Option<i64>,
     pub save_dir: Option<PathBuf>,
     pub mods_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub minutes_to_beat: Option<u32>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub review: Option<String>,
+    #[serde(default)]
+    pub process_name: Option<String>,
 }
 
 /// What an import did.
@@ -274,6 +282,10 @@ impl Db {
                 franchise_order: extra.franchise_order,
                 save_dir: extra.save_dir,
                 mods_dir: extra.mods_dir,
+                minutes_to_beat: extra.minutes_to_beat,
+                notes: extra.notes,
+                review: extra.review,
+                process_name: extra.process_name,
             });
         }
         Ok(LibraryExport {
@@ -351,6 +363,10 @@ impl Db {
             self.set_franchise(id, game.franchise.as_deref(), game.franchise_order)?;
             self.set_save_dir(id, game.save_dir.as_deref())?;
             self.set_mods_dir(id, game.mods_dir.as_deref())?;
+            self.set_minutes_to_beat(id, game.minutes_to_beat)?;
+            self.set_notes(id, game.notes.as_deref())?;
+            self.set_review(id, game.review.as_deref())?;
+            self.set_process_name(id, game.process_name.as_deref())?;
         }
         tx.commit()?;
         self.refresh_exe_installed()?;

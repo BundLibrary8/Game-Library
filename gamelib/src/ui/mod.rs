@@ -9,14 +9,17 @@
 //!   worker, and the frame around every screen (icon rail, status bar).
 //! - `theme.rs`: colours and fonts for each look.
 //! - `paint.rs`: drawing helpers (gradients, star map, covers, buttons).
-//! - `home.rs`, `library.rs`, `details.rs`, `franchises.rs`, `stats.rs`,
-//!   `profile.rs`, `shop.rs`, `settings.rs`: one screen each.
+//! - `home.rs`, `library.rs`, `details.rs`, `discover.rs`, `assistant.rs`,
+//!   `franchises.rs`, `stats.rs`, `profile.rs`, `shop.rs`, `settings.rs`:
+//!   one screen each.
 //! - `dialogs.rs`: the pop-up windows.
 //! - `couch.rs`: Couch Mode, the full-screen controller-friendly view.
 
+mod assistant;
 mod couch;
 mod details;
 mod dialogs;
+mod discover;
 mod franchises;
 mod game_extras;
 mod home;
@@ -33,6 +36,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use eframe::egui::{self, Color32, Sense, Stroke, vec2};
+use gamelib::backlog::{Goal, Habits};
 use gamelib::db::{Db, GameQuery, SortBy, keys};
 use gamelib::extras::GameExtras;
 use gamelib::friends::Friend;
@@ -64,6 +68,10 @@ pub enum Screen {
     Library,
     /// One game's page.
     Details(i64),
+    /// Backlog Intelligence and suggestions.
+    Discover,
+    /// Ask questions about the library.
+    Assistant,
     Franchises,
     Stats,
     Profile,
@@ -76,6 +84,8 @@ impl Screen {
         Some(match name {
             "home" => Screen::Home,
             "library" => Screen::Library,
+            "discover" => Screen::Discover,
+            "assistant" => Screen::Assistant,
             "franchises" => Screen::Franchises,
             "stats" => Screen::Stats,
             "profile" => Screen::Profile,
@@ -125,6 +135,12 @@ pub struct Data {
     pub extras: HashMap<i64, GameExtras>,
     /// What to play next, best first.
     pub recommendations: Vec<Recommendation>,
+    /// How well every unplayed game matches your tastes, best first.
+    pub taste: Vec<Recommendation>,
+    /// Each game's tags, leaving out collections.
+    pub taste_tags: HashMap<i64, Vec<String>>,
+    /// How you tend to play.
+    pub habits: Habits,
 }
 
 impl Data {
@@ -171,10 +187,15 @@ impl Data {
         for names in taste_tags.values_mut() {
             names.retain(|name| !collections.contains(name.as_str()));
         }
-        let recommendations = insights::recommend(&visible, &extras, &taste_tags, 12);
+        let taste = insights::recommend(&visible, &extras, &taste_tags, usize::MAX);
+        let recommendations = taste.iter().take(12).cloned().collect();
+        let habits = gamelib::backlog::habits(&db.session_rows(0)?, now());
         Ok(Data {
             extras,
             recommendations,
+            taste,
+            taste_tags,
+            habits,
             visible,
             games,
             hidden_count,
@@ -214,6 +235,7 @@ pub struct SettingsInputs {
     pub folders: Vec<PathBuf>,
     pub steamgriddb_key: String,
     pub steam_key: String,
+    pub anthropic_key: String,
 }
 
 /// Everything the window is showing right now.
@@ -258,6 +280,13 @@ pub struct GameLibApp {
     couch_fullscreen_pending: bool,
     /// Game controllers.
     pad: couch::Pad,
+    /// Discover: how much free time you have, and what you're after.
+    discover_free: u32,
+    discover_goal: Goal,
+    /// The conversation on the Assistant screen.
+    chat: assistant::Chat,
+    /// What's being typed in a game's notes panel.
+    notes_draft: Option<game_extras::NotesDraft>,
     /// Whether the backgrounds move.
     animate: bool,
     /// The clock the backgrounds are drawn at this frame, or `None` when
@@ -333,6 +362,7 @@ impl GameLibApp {
             folders: db.scan_folders()?,
             steamgriddb_key: db.get_setting(keys::STEAMGRIDDB_KEY)?.unwrap_or_default(),
             steam_key: db.get_setting(keys::STEAM_API_KEY)?.unwrap_or_default(),
+            anthropic_key: db.get_setting(keys::ANTHROPIC_KEY)?.unwrap_or_default(),
         };
         // Reading the PC's specs takes a moment, so it's done on its own
         // thread rather than holding up the window.
@@ -350,6 +380,10 @@ impl GameLibApp {
             couch: None,
             couch_fullscreen_pending: false,
             pad: couch::Pad::new(),
+            discover_free: 120,
+            discover_goal: Goal::Anything,
+            chat: assistant::Chat::default(),
+            notes_draft: None,
             settings,
             db,
             worker,
@@ -561,8 +595,16 @@ impl GameLibApp {
                     self.job_done();
                     self.status = format!("Friends updated ({}).", friends.len());
                 }
+                WorkerResult::AssistantReply(reply) => {
+                    self.job_done();
+                    self.status.clear();
+                    self.claude_replied(reply);
+                }
                 WorkerResult::Error { context, message } => {
                     self.job_done();
+                    if context.starts_with("Couldn't ask Claude") {
+                        self.chat.waiting = false;
+                    }
                     // A launch that failed isn't running.
                     if context.starts_with("Couldn't start") {
                         self.running.clear();
@@ -638,7 +680,7 @@ impl GameLibApp {
         );
 
         ui.vertical_centered(|ui| {
-            ui.spacing_mut().item_spacing.y = 10.0;
+            ui.spacing_mut().item_spacing.y = 8.0;
             ui.add_space(34.0);
 
             // The orb: your profile.
@@ -670,6 +712,16 @@ impl GameLibApp {
             for (screen, icon, tip) in [
                 (Screen::Home, Icon::Home, "Home"),
                 (Screen::Library, Icon::Library, "Library"),
+                (
+                    Screen::Discover,
+                    Icon::Discover,
+                    "Discover: your backlog and what to play",
+                ),
+                (
+                    Screen::Assistant,
+                    Icon::Assistant,
+                    "Assistant: ask about your library",
+                ),
                 (Screen::Franchises, Icon::Franchises, "Franchises"),
                 (Screen::Stats, Icon::Stats, "Stats"),
                 (Screen::Shop, Icon::Shop, "Shop"),
@@ -677,7 +729,7 @@ impl GameLibApp {
             ] {
                 let selected = self.screen == screen
                     || (screen == Screen::Library && matches!(self.screen, Screen::Details(_)));
-                let (rect, response) = ui.allocate_exact_size(vec2(54.0, 54.0), Sense::click());
+                let (rect, response) = ui.allocate_exact_size(vec2(50.0, 50.0), Sense::click());
                 if selected {
                     ui.painter().rect_filled(rect, 14.0, theme.panel_alt);
                     ui.painter().rect_stroke(
@@ -879,6 +931,8 @@ impl eframe::App for GameLibApp {
                                     Screen::Home => self.home_screen(ui),
                                     Screen::Library => self.library_screen(ui),
                                     Screen::Details(game_id) => self.details_screen(ui, game_id),
+                                    Screen::Discover => self.discover_screen(ui),
+                                    Screen::Assistant => self.assistant_screen(ui),
                                     Screen::Franchises => self.franchises_screen(ui),
                                     Screen::Stats => self.stats_screen(ui),
                                     Screen::Profile => self.profile_screen(ui),

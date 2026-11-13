@@ -113,13 +113,36 @@ impl GameLibApp {
                         .desired_width(340.0),
                 );
                 ui.end_row();
+                ui.label("Anthropic (assistant)");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.settings.anthropic_key)
+                        .password(true)
+                        .hint_text("Optional: lets the Assistant ask Claude")
+                        .desired_width(340.0),
+                );
+                ui.end_row();
             });
+            let mut use_claude = self
+                .db
+                .get_bool_setting(keys::ASSISTANT_USE_CLAUDE, true)
+                .unwrap_or(true);
+            if ui
+                .checkbox(
+                    &mut use_claude,
+                    "Let the Assistant ask Claude (sends a summary of your library: titles, hours, status, ratings and genres)",
+                )
+                .changed()
+            {
+                let saved = self.db.set_bool_setting(keys::ASSISTANT_USE_CLAUDE, use_claude);
+                self.check(saved);
+            }
             ui.horizontal(|ui| {
                 if ui.button("Save keys").clicked() {
                     let saved = self
                         .db
                         .set_setting(keys::STEAMGRIDDB_KEY, self.settings.steamgriddb_key.trim())
-                        .and_then(|()| self.db.set_setting(keys::STEAM_API_KEY, self.settings.steam_key.trim()));
+                        .and_then(|()| self.db.set_setting(keys::STEAM_API_KEY, self.settings.steam_key.trim()))
+                        .and_then(|()| self.db.set_setting(keys::ANTHROPIC_KEY, self.settings.anthropic_key.trim()));
                     if self.check(saved).is_some() {
                         self.status = "Keys saved.".to_string();
                     }

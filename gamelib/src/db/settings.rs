@@ -14,6 +14,10 @@ pub mod keys {
     pub const STEAMGRIDDB_KEY: &str = "steamgriddb_api_key";
     /// Steam Web API key (friends list). Never commit this to Git.
     pub const STEAM_API_KEY: &str = "steam_api_key";
+    /// Anthropic API key (the assistant asks Claude). Never commit this to Git.
+    pub const ANTHROPIC_KEY: &str = "anthropic_api_key";
+    /// "0" to keep the assistant to its built-in answers even with a key.
+    pub const ASSISTANT_USE_CLAUDE: &str = "assistant.use_claude";
     /// JSON array of folders for the folder scan.
     pub const SCAN_FOLDERS: &str = "scan_folders";
     pub const SCAN_ON_STARTUP: &str = "scan_on_startup";

@@ -1110,6 +1110,8 @@ pub enum Icon {
     Shop,
     Settings,
     Couch,
+    Discover,
+    Assistant,
 }
 
 pub fn icon(painter: &egui::Painter, icon: Icon, centre: Pos2, colour: Color32) {
@@ -1148,6 +1150,22 @@ pub fn icon(painter: &egui::Painter, icon: Icon, centre: Pos2, colour: Color32) 
             }
         }
         Icon::Shop => star4(painter, centre, 10.0, colour),
+        Icon::Discover => {
+            // A compass.
+            painter.circle_stroke(centre, 9.0, stroke);
+            painter.add(egui::Shape::convex_polygon(
+                vec![p(3.5, -3.5), p(1.2, 1.2), p(-3.5, 3.5), p(-1.2, -1.2)],
+                colour,
+                Stroke::NONE,
+            ));
+        }
+        Icon::Assistant => {
+            // A speech bubble with a small sparkle.
+            let bubble = Rect::from_center_size(p(-1.0, -1.5), vec2(17.0, 12.5));
+            painter.rect_stroke(bubble, 4.0, stroke, egui::StrokeKind::Middle);
+            painter.line(vec![p(-5.0, 4.7), p(-7.0, 9.0), p(-1.0, 4.7)], stroke);
+            star4(painter, p(7.5, -7.5), 4.0, colour);
+        }
         Icon::Couch => {
             // A television on a stand.
             let screen = Rect::from_center_size(p(0.0, -2.0), vec2(20.0, 13.0));

@@ -22,6 +22,8 @@
 //! - [`worker`]   the background thread the UI talks to through channels
 
 pub mod artwork;
+pub mod assistant;
+pub mod backlog;
 pub mod backup;
 pub mod db;
 pub mod extras;

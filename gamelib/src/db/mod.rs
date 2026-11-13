@@ -136,6 +136,14 @@ const MIGRATIONS: &[&str] = &[
     // v6: covers are now looked for in more places, so games marked as
     // having none anywhere are given another try
     "UPDATE games SET art_checked_at = NULL WHERE cover_path IS NULL;",
+    // v7: how long a game takes to beat, your notes and review, and the
+    // process to watch when it doesn't run from its install folder
+    "
+    ALTER TABLE games ADD COLUMN minutes_to_beat INTEGER;
+    ALTER TABLE games ADD COLUMN notes TEXT;
+    ALTER TABLE games ADD COLUMN review TEXT;
+    ALTER TABLE games ADD COLUMN process_name TEXT;
+    ",
 ];
 
 /// A connection to the library database.

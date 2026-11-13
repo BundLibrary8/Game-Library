@@ -62,6 +62,13 @@ pub enum Job {
     },
     /// Fetch the Steam friends list.
     RefreshFriends,
+    /// Ask Claude a question about the library. `context` describes the
+    /// library; `history` is the conversation, ending with the question.
+    AskClaude {
+        api_key: String,
+        context: String,
+        history: Vec<crate::assistant::Turn>,
+    },
     /// Finish the current job and stop the worker.
     Shutdown,
 }
@@ -119,6 +126,8 @@ pub enum WorkerResult {
         failed: usize,
     },
     FriendsUpdated(Vec<Friend>),
+    /// Claude's answer, or why there isn't one.
+    AssistantReply(Result<String, String>),
     /// Something went wrong. Show `message` in the status bar; the app
     /// carries on.
     Error {
@@ -290,6 +299,7 @@ impl WorkerState {
                 "Cover download failed".to_string()
             }
             Job::RefreshFriends => "Couldn't update friends".to_string(),
+            Job::AskClaude { .. } => "Couldn't ask Claude".to_string(),
             Job::Shutdown => return,
         };
         let outcome = match job {
@@ -303,11 +313,38 @@ impl WorkerState {
                 search_title,
             } => self.fetch_cover(game_id, search_title.as_deref()),
             Job::RefreshFriends => self.refresh_friends(),
+            Job::AskClaude {
+                api_key,
+                context,
+                history,
+            } => self.ask_claude(api_key, context, history),
             Job::Shutdown => Ok(()),
         };
         if let Err(err) = outcome {
             self.reporter.error(&context, &err);
         }
+    }
+
+    /// Claude can take a while to answer, so the question gets its own
+    /// thread and the worker stays free for other jobs.
+    fn ask_claude(
+        &self,
+        api_key: String,
+        context: String,
+        history: Vec<crate::assistant::Turn>,
+    ) -> Result<()> {
+        let reporter = self.reporter.clone();
+        thread::Builder::new()
+            .name("gamelib-assistant".into())
+            .spawn(move || {
+                let reply = crate::assistant::ask_claude(&api_key, &context, &history)
+                    .map_err(|err| format!("{err:#}"));
+                if let Err(err) = &reply {
+                    log::error!("Claude: {err}");
+                }
+                reporter.send(WorkerResult::AssistantReply(reply));
+            })?;
+        Ok(())
     }
 
     fn scan_library(&self) -> Result<()> {
@@ -365,13 +402,17 @@ impl WorkerState {
             daily_stardust,
         });
 
-        let Some(watch_dir) = game.watch_dir() else {
+        let watch = playtime::Watch {
+            dir: game.watch_dir(),
+            process_name: self.db.extras(game_id)?.process_name,
+        };
+        if watch.is_empty() {
             log::warn!(
-                "{} has no install folder, so its playtime can't be tracked",
+                "{} has no install folder or process name, so its playtime can't be tracked",
                 game.title
             );
             return Ok(());
-        };
+        }
         if !self
             .tracking
             .lock()
@@ -394,7 +435,7 @@ impl WorkerState {
                 let outcome = (|| -> Result<()> {
                     let db = Db::open(&db_path)?;
                     let mut env = SystemEnvironment::new()?;
-                    playtime::track(&db, game_id, &watch_dir, &timings, &mut env, |event| {
+                    playtime::track(&db, game_id, &watch, &timings, &mut env, |event| {
                         let result = match event {
                             TrackEvent::SessionStarted { game_id, .. } => {
                                 WorkerResult::SessionStarted { game_id }
