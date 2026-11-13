@@ -5,10 +5,14 @@
 //! **If one source fails (say Epic isn't installed), the others still
 //! run**, and the failure is reported instead of stopping the scan.
 
+pub mod battlenet;
+pub mod ea;
 pub mod epic;
 pub mod folder;
 pub mod gog;
+pub mod riot;
 pub mod steam;
+pub mod uninstall;
 
 use anyhow::Result;
 
@@ -64,6 +68,17 @@ pub fn enabled_sources(db: &Db) -> Result<Vec<Box<dyn GameSource>>> {
     if db.source_enabled(Source::Gog)? {
         sources.push(Box::new(gog::GogSource));
     }
+    // These come after the stores above, so a game they also know about
+    // (an EA game bought on Steam, say) stays with the store it came from.
+    if db.source_enabled(Source::BattleNet)? {
+        sources.push(Box::new(battlenet::BattleNetSource));
+    }
+    if db.source_enabled(Source::Riot)? {
+        sources.push(Box::new(riot::RiotSource));
+    }
+    if db.source_enabled(Source::Ea)? {
+        sources.push(Box::new(ea::EaSource));
+    }
     Ok(sources)
 }
 
@@ -74,7 +89,22 @@ pub fn scan_into(db: &Db, sources: &[Box<dyn GameSource>], now: i64) -> Result<S
     let mut report = ScanReport::default();
     for source in sources {
         match source.detect() {
-            Ok(games) => {
+            Ok(mut games) => {
+                // A launcher can list a game that a store already has (an EA
+                // game bought on Steam opens through the EA app too). Keep it
+                // with the store, so it doesn't appear twice.
+                if is_launcher(source.source()) {
+                    let store_dirs =
+                        db.install_dirs(&[Source::Steam, Source::Epic, Source::Gog])?;
+                    games.retain(|game| {
+                        game.install_dir.as_deref().is_none_or(|dir| {
+                            !store_dirs.iter().any(|known| {
+                                crate::paths::is_inside(dir, known)
+                                    || crate::paths::is_inside(known, dir)
+                            })
+                        })
+                    });
+                }
                 let mut found_ids = Vec::with_capacity(games.len());
                 for game in &games {
                     let outcome = db.upsert_detected(game, now)?;
@@ -97,6 +127,12 @@ pub fn scan_into(db: &Db, sources: &[Box<dyn GameSource>], now: i64) -> Result<S
         }
     }
     Ok(report)
+}
+
+/// Sources that are launchers for games sold elsewhere too, rather than
+/// stores. Their games give way to a store's copy of the same game.
+fn is_launcher(source: Source) -> bool {
+    matches!(source, Source::BattleNet | Source::Riot | Source::Ea)
 }
 
 /// Save games the user ticked on the import review screen. Returns
@@ -165,6 +201,57 @@ mod tests {
         let second = scan_into(&db, &sources, 20).unwrap();
         assert_eq!((second.added, second.updated, second.missing), (0, 2, 0));
         assert_eq!(db.list_games().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_launcher_game_already_owned_through_a_store_is_not_added_twice() {
+        let db = Db::open_in_memory().unwrap();
+        let store_copy = DetectedGame {
+            title: "Apex Legends".into(),
+            source: Source::Steam,
+            source_id: "1172470".into(),
+            install_dir: Some(std::path::PathBuf::from("/steam/common/Apex Legends")),
+            launch: LaunchTarget::Uri("steam://rungameid/1172470".into()),
+        };
+        db.upsert_detected(&store_copy, 1).unwrap();
+
+        struct Ea;
+        impl GameSource for Ea {
+            fn name(&self) -> &str {
+                "EA app"
+            }
+            fn source(&self) -> Source {
+                Source::Ea
+            }
+            fn detect(&self) -> Result<Vec<DetectedGame>> {
+                let game = |title: &str, dir: &str| DetectedGame {
+                    title: title.into(),
+                    source: Source::Ea,
+                    source_id: title.into(),
+                    install_dir: Some(std::path::PathBuf::from(dir)),
+                    launch: LaunchTarget::Uri("origin2://game/launch?offerIds=X".into()),
+                };
+                Ok(vec![
+                    game("Apex Legends", "/steam/common/Apex Legends"),
+                    game("The Sims 4", "/ea/The Sims 4"),
+                ])
+            }
+        }
+        let sources: Vec<Box<dyn GameSource>> = vec![Box::new(Ea)];
+        let report = scan_into(&db, &sources, 2).unwrap();
+        assert_eq!(report.added, 1);
+        let titles: Vec<String> = db
+            .list_games()
+            .unwrap()
+            .into_iter()
+            .map(|g| g.title)
+            .collect();
+        assert_eq!(
+            titles,
+            ["Apex Legends", "The Sims 4"],
+            "Apex stays a Steam game"
+        );
+        assert_eq!(db.list_games().unwrap()[0].source, Source::Steam);
     }
 
     #[test]

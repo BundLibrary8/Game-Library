@@ -321,10 +321,15 @@ impl WorkerState {
     fn scan_folders(&self) -> Result<()> {
         let source = FolderSource {
             roots: self.db.scan_folders()?,
-            // Don't offer games that Steam, Epic or GOG already manage…
-            skip_dirs: self
-                .db
-                .install_dirs(&[Source::Steam, Source::Epic, Source::Gog])?,
+            // Don't offer games that a store or launcher already manages…
+            skip_dirs: self.db.install_dirs(&[
+                Source::Steam,
+                Source::Epic,
+                Source::Gog,
+                Source::BattleNet,
+                Source::Riot,
+                Source::Ea,
+            ])?,
         };
         // …or ones that were already imported from a folder or by hand.
         let known: HashSet<String> = self

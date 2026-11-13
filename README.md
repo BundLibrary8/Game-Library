@@ -1,7 +1,8 @@
 # GameLib
 
 A Windows desktop app, written in Rust, that gathers every game you own
-(Steam, Epic, GOG, loose folders, and games you add by hand) into one
+(Steam, Epic, GOG, Battle.net, Riot Client, EA app, loose folders, and
+games you add by hand) into one
 library. It launches them, tracks how long you play, and shows covers,
 stats, recommendations and more.
 
@@ -68,8 +69,9 @@ cargo run
 
 ## First steps in the app
 
-1. Press **Scan** (top right of the Library) to find your Steam, Epic and
-   GOG games.
+1. Press **Scan** (top right of the Library) to find your Steam, Epic,
+   GOG, Battle.net, Riot Client and EA app games. Each can be switched off
+   under **Settings → Where to look for games**.
 2. For games that aren't in a launcher, use **+ Add game**, or add a
    folder under **Settings → Folders to scan** and use **Scan → Scan my
    game folders**.

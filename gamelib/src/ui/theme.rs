@@ -359,6 +359,9 @@ pub fn source_name(source: Source) -> &'static str {
         Source::Steam => "Steam",
         Source::Epic => "Epic Games",
         Source::Gog => "GOG",
+        Source::BattleNet => "Battle.net",
+        Source::Riot => "Riot Client",
+        Source::Ea => "EA app",
         Source::Folder => "Local folders",
         Source::Manual => "Added by hand",
     }
@@ -370,6 +373,9 @@ pub fn source_badge(source: Source) -> &'static str {
         Source::Steam => "STEAM",
         Source::Epic => "EPIC",
         Source::Gog => "GOG",
+        Source::BattleNet => "BATTLE.NET",
+        Source::Riot => "RIOT",
+        Source::Ea => "EA",
         Source::Folder | Source::Manual => "LOCAL",
     }
 }
@@ -380,6 +386,9 @@ pub fn source_colour(source: Source) -> Color32 {
         Source::Steam => rgb(0x4f8dfd),
         Source::Epic => rgb(0xc9ced9),
         Source::Gog => rgb(0xa970ff),
+        Source::BattleNet => rgb(0x00b4ff),
+        Source::Riot => rgb(0xff4655),
+        Source::Ea => rgb(0xff8a3d),
         Source::Folder => rgb(0x4cc38a),
         Source::Manual => rgb(0x2fb7a4),
     }
