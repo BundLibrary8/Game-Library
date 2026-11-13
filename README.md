@@ -47,6 +47,52 @@ app uses. Later runs start in seconds.
 > Keep the folder somewhere like `C:\dev`, **not inside OneDrive**. A Rust
 > build creates thousands of files, and OneDrive will try to sync them all.
 
+## Run it again
+
+After the first time, you don't need to clone or download anything again.
+Open PowerShell and run:
+
+```powershell
+cd C:\dev\Game-Library\gamelib
+```
+
+```powershell
+cargo run
+```
+
+Use the folder you cloned into if it isn't `C:\dev`. It starts in a few
+seconds, because only changed code is rebuilt. Close the window (or use
+**Quit** in the tray menu) to stop it; your library is saved as you go.
+
+**A faster app.** `cargo run` makes a debug build, which starts quickly
+but runs slower. For everyday use, build the optimised version once:
+
+```powershell
+cargo build --release
+```
+
+Then start GameLib by double-clicking
+`Game-Library\gamelib\target\release\gamelib.exe` (pin it to the taskbar
+or Start menu if you like). Run `cargo build --release` again after you
+get a new version, or the `.exe` stays old.
+
+**Try changes that haven't been merged yet.** To run the version on a pull
+request's branch, for example `claude/nice-feynman-kjrf7j`:
+
+```powershell
+git fetch origin claude/nice-feynman-kjrf7j
+```
+
+```powershell
+git checkout claude/nice-feynman-kjrf7j
+```
+
+```powershell
+cargo run
+```
+
+Go back with `git checkout main`.
+
 ## Get the latest version
 
 Inside your `Game-Library` folder:
@@ -199,31 +245,50 @@ libraries and stats on the **Friends** page (the **GameLib friends** tab).
 Accounts are stored in the project's Supabase database
 (`https://ynjmutmaslrabyeucvzk.supabase.co`).
 
-**One-time setup in Supabase** (whoever owns the project does this once):
+**Nothing to set up.** The database is already set up and the project's
+key is built into GameLib. Open **Friends → GameLib friends**, then
+**Create an account** (username, email and password) or **Log in**.
 
-1. Open the project at <https://supabase.com/dashboard>, go to **SQL Editor**
-   → **New query**, paste the whole of `supabase/schema.sql` from this
-   repository, and press **Run**. This makes the tables (profiles, friend
-   requests, shared libraries, stats) and the security rules that keep a
-   library visible only to its owner and their accepted friends.
-2. Go to **Project Settings** → **API** and copy the **anon public** key
-   (or the newer **publishable** key).
-3. Optional: under **Authentication** → **Sign In / Providers** → Email,
-   switch off **Confirm email** if you don't want new accounts to need to
-   click an email link before logging in.
+New accounts get a confirmation email. Click the link in it, then log in.
+The page the link opens afterwards may not load, but the account is
+confirmed anyway.
 
-**In GameLib:** paste the anon key into **Settings → GameLib account** (or
-on the Friends page, which asks for it). Then **Create an account**
-(username, email and password) or **Log in**. To build the key in so
-nobody has to paste it, set `GAMELIB_SUPABASE_ANON_KEY` when building:
+**For whoever owns the Supabase project:**
 
-```powershell
-$env:GAMELIB_SUPABASE_ANON_KEY = "your anon key"
-```
+- **Running the database script again.** `supabase/schema.sql` is safe to
+  run more than once: it only adds what's missing and updates the
+  functions and rules, and it keeps existing accounts, friends and
+  libraries. Run it again after pulling a version that changes it. Open
+  the project at <https://supabase.com/dashboard>, go to **SQL Editor** →
+  **New query**, paste the whole file, and press **Run**.
+- **Instant sign-ups.** To stop new accounts needing the email link, go to
+  **Authentication** → **Sign In / Providers** → **Email** and switch off
+  **Confirm email**.
+- **The page after confirming.** It goes to the **Site URL**, which is
+  currently `http://localhost:3000`. Change it under **Authentication** →
+  **URL Configuration**.
+- **A different Supabase project.** Enter its key in **Settings → GameLib
+  account**, or build it in instead of the default:
 
-```powershell
-cargo run
-```
+  ```powershell
+  $env:GAMELIB_SUPABASE_ANON_KEY = "the project's anon or publishable key"
+  ```
+
+  ```powershell
+  cargo run
+  ```
+
+- **Checking the live project still works.** The first command goes into
+  the code folder, and the second runs the checks against the real project
+  (it doesn't create accounts):
+
+  ```powershell
+  cd gamelib
+  ```
+
+  ```powershell
+  cargo test --test supabase_live -- --ignored
+  ```
 
 Once logged in:
 
