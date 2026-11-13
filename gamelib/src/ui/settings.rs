@@ -19,7 +19,14 @@ impl GameLibApp {
         theme.panel_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(paint::strong("Where to look for games", 17.0));
-            for source in [Source::Steam, Source::Epic, Source::Gog] {
+            for source in [
+                Source::Steam,
+                Source::Epic,
+                Source::Gog,
+                Source::BattleNet,
+                Source::Riot,
+                Source::Ea,
+            ] {
                 let mut enabled = self.db.source_enabled(source).unwrap_or(true);
                 if ui.checkbox(&mut enabled, source_name(source)).changed() {
                     self.check(self.db.set_source_enabled(source, enabled));

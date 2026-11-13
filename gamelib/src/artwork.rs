@@ -167,16 +167,19 @@ pub fn save_cover(picture: &[u8], covers_dir: &Path, game_id: i64) -> Result<Pat
     Ok(dest)
 }
 
-/// The exe whose icon best represents a game: the one it launches, or for
-/// launcher games (Steam, Epic) the most likely game exe in its install
-/// folder.
+/// The exe whose icon best represents a game: the one it launches, if
+/// that is the game's own; otherwise the most likely game exe in its
+/// install folder. A game started through a launcher program (Battle.net,
+/// the Riot Client) gets its own icon, never the launcher's.
 pub fn icon_source_exe(game: &Game) -> Option<PathBuf> {
+    let install_dir = game.install_dir.as_deref().filter(|dir| dir.is_dir());
     if let LaunchTarget::Exe { path, .. } = &game.launch
         && path.is_file()
+        && install_dir.is_none_or(|dir| crate::paths::is_inside(path, dir))
     {
         return Some(path.clone());
     }
-    let install_dir = game.install_dir.as_deref().filter(|dir| dir.is_dir())?;
+    let install_dir = install_dir?;
     let folder_name = install_dir.file_name()?.to_str()?;
     folder::pick_best_exe(folder_name, &folder::find_exes(install_dir))
 }
@@ -500,6 +503,22 @@ mod tests {
         let other = install.join("unins000.exe");
         game.launch = LaunchTarget::exe(&other);
         assert_eq!(icon_source_exe(&game), Some(other));
+
+        // Started through a launcher program elsewhere: the game's own exe,
+        // not the launcher's.
+        let launcher = dir.path().join("Launcher").join("Launcher.exe");
+        fs::create_dir_all(launcher.parent().unwrap()).unwrap();
+        fs::write(&launcher, vec![0u8; 50_000]).unwrap();
+        game.launch = LaunchTarget::Exe {
+            path: launcher.clone(),
+            args: vec!["--launch-product=ember".into()],
+            working_dir: None,
+        };
+        assert_eq!(icon_source_exe(&game), Some(exe.clone()));
+        game.install_dir = Some(dir.path().join("Launcher").join("empty"));
+        fs::create_dir_all(game.install_dir.as_ref().unwrap()).unwrap();
+        assert_eq!(icon_source_exe(&game), None, "never the launcher's icon");
+        game.install_dir = Some(install.clone());
 
         // Nothing on disk: no icon source.
         game.launch = LaunchTarget::Uri("steam://rungameid/1".into());

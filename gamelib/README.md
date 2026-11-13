@@ -1,7 +1,7 @@
 # GameLib backend
 
-The non-UI half of GameLib: one library for Steam, Epic, GOG, loose folders
-and hand-added games, with launching, playtime tracking, cover art, stats,
+The non-UI half of GameLib: one library for Steam, Epic, GOG, Battle.net,
+Riot Client, EA app, loose folders and hand-added games, with launching, playtime tracking, cover art, stats,
 a local profile, Steam friends, and the Stardust shop.
 
 The window (`src/ui/`) follows the designs in
@@ -37,7 +37,7 @@ The same program also has command-line commands (`src/cli.rs`).
 ```powershell
 cargo run                              # open the window
 cargo run -- help                      # list the command-line commands
-cargo run -- scan                      # find Steam, Epic and GOG games
+cargo run -- scan                      # find games from every store and launcher
 cargo run -- list
 ```
 
@@ -74,7 +74,7 @@ cargo fmt
 |---|---|
 | `model.rs` | Core types: `Game`, `Source`, `LaunchTarget`, `DetectedGame` |
 | `db/` | SQLite storage: schema and upgrades (`mod.rs`), `games`, `tags`, `sessions`, `settings` |
-| `sources/` | The `GameSource` trait and one file each for Steam, Epic, GOG and folder scan |
+| `sources/` | The `GameSource` trait and one file each for Steam, Epic, GOG, Battle.net, Riot, EA and folder scan; `uninstall.rs` reads Windows' installed-programs list, which Battle.net, Riot and EA games are found through |
 | `launcher.rs` | Starts a game (an exe, or a `steam://` / Epic link) |
 | `playtime.rs` | Decides when a game is running; the pure `step` function plus the tracking loop |
 | `artwork.rs` | Covers from Steam's cache and icons read out of exes, no key needed |
@@ -106,16 +106,23 @@ anything slow). See the example at the top of `worker.rs`.
   renaming spends it.
 - **Days are counted in UTC** for the daily reward and the per-day chart.
 
-## Not yet checked on Windows
+## Checked on Windows, and not
 
-This was written and tested on Linux. These parts only do real work on
-Windows and need the manual checklist on a real PC:
+The Windows build has been run under Wine (a Windows compatibility layer)
+with a test library. That checked:
 
-- Steam detection against a real Steam install (tested here with a fake one)
-- Epic detection against real `.item` files (tested with sample files)
-- GOG registry reading (compiles for Windows; never run)
+- covers and icons showing from `C:\` paths
+- reading the installed-programs list, and finding Battle.net, Riot and EA
+  app games from it (with an EA game bought on Steam correctly left out)
+
+Never checked against the real thing:
+
+- Steam, Epic and GOG detection against real installs (tested with fake
+  ones and sample files)
+- Starting games through Battle.net (`--exec="launch <code>"`), the Riot
+  Client (`--launch-product`) and the EA app (`origin2://` links)
 - Opening `steam://` and Epic links
-- Copying covers from a real Steam library cache, and Steam's public image server
-- The window itself, and its file-picker dialogs (the window was run on Linux only)
+- Copying covers from a real Steam library cache, and Steam's image servers
+- The file-picker dialogs
 - SteamGridDB, Steam Store and Steam Web API calls (the parsers are tested
   against sample responses; the live endpoints were never called)

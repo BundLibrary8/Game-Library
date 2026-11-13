@@ -10,15 +10,21 @@ pub enum Source {
     Steam,
     Epic,
     Gog,
+    BattleNet,
+    Riot,
+    Ea,
     Folder,
     Manual,
 }
 
 impl Source {
-    pub const ALL: [Source; 5] = [
+    pub const ALL: [Source; 8] = [
         Source::Steam,
         Source::Epic,
         Source::Gog,
+        Source::BattleNet,
+        Source::Riot,
+        Source::Ea,
         Source::Folder,
         Source::Manual,
     ];
@@ -29,6 +35,9 @@ impl Source {
             Source::Steam => "steam",
             Source::Epic => "epic",
             Source::Gog => "gog",
+            Source::BattleNet => "battlenet",
+            Source::Riot => "riot",
+            Source::Ea => "ea",
             Source::Folder => "folder",
             Source::Manual => "manual",
         }
@@ -39,6 +48,9 @@ impl Source {
             "steam" => Source::Steam,
             "epic" => Source::Epic,
             "gog" => Source::Gog,
+            "battlenet" => Source::BattleNet,
+            "riot" => Source::Riot,
+            "ea" => Source::Ea,
             "folder" => Source::Folder,
             "manual" => Source::Manual,
             other => bail!("unknown game source '{other}'"),
