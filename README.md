@@ -88,7 +88,8 @@ needs an internet connection the first time; if you are offline it tries
 again next start.
 
 The icons down the left are Profile, Home, Library, Discover, Assistant,
-Franchises, Stats, Shop, Library health, Devices and Settings. The TV icon at the bottom opens
+Game Room, Franchises, Stats, Shop, Friends, Mod library, Library health,
+Devices and Settings. The TV icon at the bottom opens
 **Couch Mode**.
 
 ### What's where
@@ -158,6 +159,51 @@ has to be switched on and nearby to connect. New devices are paired in
 Windows' own Bluetooth settings (there's a button for it). Bluetooth LE-only
 devices, like some mice and fitness trackers, don't appear here; manage
 them in Windows' settings.
+
+### Covers for games that aren't on Steam
+
+Covers come from Steam first. Games from elsewhere now get one too, with no
+key needed: Epic games (Fortnite, Rocket League…) use the official box art
+from the catalogue the Epic launcher keeps on your PC, and anything else
+(Valorant, League of Legends…) uses the picture at the top of the game's
+Wikipedia article. A free SteamGridDB key (Settings) still gives the widest
+choice. Games without a cover are looked up again straight after this
+update; use **Settings → Download missing covers** to try again any time.
+
+### Game Room, Friends, Mod library and achievements
+
+- **Game Room** (couch icon): your own virtual gaming room. A window onto
+  your background, a TV showing what you're playing (with a Play button), a
+  shelf of favourites (or most played, or recent), a poster of your most
+  played game, a trophy cabinet, and online friends on the couch. Choose
+  the shelf and wall colour at the top.
+- **Friends** (two people icon): what your Steam friends own and play,
+  what's hot among them, and the games you have in common. Press **Refresh
+  their games**. Needs the Steam Web API key (Settings) and your Steam
+  account (profile); friends who keep their game details private can't be
+  shown. A game's page also lists which friends have it.
+- **Mod library** (puzzle icon): every game's mods. Switch mods on and off
+  (switched-off mods are moved into a hidden `.gamelib-disabled` folder the
+  game doesn't load), install from a `.zip`, file or folder, remove, and
+  open the folder. Common mods folders (`Mods`, `BepInEx\plugins`…) are
+  found for you.
+- **Achievement tracker** (Stats → Achievement tracker, or Ctrl+K): each
+  game's own achievements. Steam games read theirs from Steam (with how
+  rare each one is); for any game you can write your own checklist on its
+  page and tick it off.
+
+### Discord
+
+Under **Settings → Discord**:
+
+- **Show what I'm playing**: your Discord profile shows "Playing Hades" with
+  a timer while you play. Discord needs an application for this: at
+  <https://discord.com/developers/applications> press **New Application**,
+  call it GameLib, and paste its **Application ID** into Settings. The
+  Discord app must be running.
+- **Post sessions to a channel**: paste a webhook URL (Server Settings →
+  Integrations → Webhooks → New Webhook → Copy Webhook URL) and GameLib posts
+  "You played Hades for 1h 20m" after each session longer than two minutes.
 
 ### Backgrounds
 

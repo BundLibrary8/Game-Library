@@ -266,7 +266,7 @@ impl GameLibApp {
     }
 }
 
-fn friend_row(ui: &mut egui::Ui, friend: &Friend, theme: &Theme) {
+pub fn friend_row(ui: &mut egui::Ui, friend: &Friend, theme: &Theme) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 58.0), Sense::hover());
     let (dot, status, status_colour) = match &friend.playing {
         Some(game) => (theme.success, format!("Playing {game}"), theme.success),

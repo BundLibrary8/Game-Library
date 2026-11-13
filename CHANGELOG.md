@@ -6,6 +6,18 @@ before tagging a release.
 
 ## [0.2.0]
 
+- Covers for games that aren't on Steam: Epic games from the Epic
+  launcher's catalogue, everything else (Valorant, League of Legends…) from
+  Wikipedia. Games without a cover are looked up again.
+- Discord: Rich Presence ("Playing …" on your profile) and posting session
+  summaries to a channel through a webhook.
+- Mod library: every game's mods, switch on and off, install from zip, file
+  or folder, remove.
+- Game Room: a virtual gaming room built from your library.
+- Achievement tracker: Steam achievements (with rarity) and your own
+  checklists for any game.
+- Friends: what your Steam friends own and play, what's popular among them,
+  games in common, and which friends have a game.
 - GameLib stays open when it starts a game: games run as separate
   programs, the Windows build no longer opens a console window (which
   closed GameLib if it was closed), and a problem while drawing the window

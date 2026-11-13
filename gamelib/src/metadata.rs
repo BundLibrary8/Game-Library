@@ -37,7 +37,11 @@ const MAX_COVER_BYTES: usize = 20 * 1024 * 1024;
 /// An HTTP client set up for GameLib's requests.
 pub fn http_client() -> Result<Client> {
     Ok(Client::builder()
-        .user_agent(concat!("gamelib/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!(
+            "gamelib/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/BundLibrary8/Game-Library)"
+        ))
         .timeout(Duration::from_secs(20))
         .build()?)
 }

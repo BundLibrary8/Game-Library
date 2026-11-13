@@ -161,6 +161,37 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE games ADD COLUMN size_bytes INTEGER;
     ALTER TABLE games ADD COLUMN size_checked_at INTEGER;
     ",
+    // v9: covers are now also found in Epic's catalogue and on Wikipedia,
+    // so games without one get another try; per-game achievements; and
+    // the games Steam friends own
+    "
+    UPDATE games SET art_checked_at = NULL WHERE cover_path IS NULL;
+    CREATE TABLE game_achievements(
+        game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+        api_name TEXT NOT NULL,            -- Steam's id, or 'manual-<n>'
+        name TEXT NOT NULL,
+        description TEXT,
+        icon_url TEXT,
+        achieved INTEGER NOT NULL DEFAULT 0,
+        unlocked_at INTEGER,
+        global_percent REAL,               -- how many players have it
+        manual INTEGER NOT NULL DEFAULT 0, -- added by hand
+        PRIMARY KEY(game_id, api_name)
+    );
+    CREATE TABLE friend_games(
+        steam_id TEXT NOT NULL,
+        app_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        playtime_minutes INTEGER NOT NULL DEFAULT 0,
+        recent_minutes INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(steam_id, app_id)
+    );
+    CREATE TABLE friend_games_checked(
+        steam_id TEXT PRIMARY KEY,
+        checked_at INTEGER NOT NULL,
+        visible INTEGER NOT NULL           -- 0 when the profile is private
+    );
+    ",
 ];
 
 /// A connection to the library database.

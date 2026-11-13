@@ -77,6 +77,9 @@ impl GameLibApp {
                 {
                     self.go(super::Screen::Wrapped(year));
                 }
+                if ui.button("Achievement tracker").clicked() {
+                    self.go(super::Screen::Achievements);
+                }
             });
         });
         ui.add_space(10.0);

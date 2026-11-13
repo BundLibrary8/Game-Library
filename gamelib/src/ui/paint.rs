@@ -1097,6 +1097,20 @@ pub fn muted(text: impl Into<String>, theme: &Theme) -> egui::RichText {
     egui::RichText::new(text).color(theme.muted)
 }
 
+/// A label in a fixed-width slot, left-aligned and cut short with "…" if
+/// it doesn't fit (`add_sized` would centre it).
+pub fn left_label(ui: &mut Ui, width: f32, label: egui::Label) -> Response {
+    ui.allocate_ui_with_layout(
+        vec2(width, 22.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_width(width);
+            ui.add(label.truncate())
+        },
+    )
+    .inner
+}
+
 /// Bold text at a given size.
 pub fn strong(text: impl Into<String>, size: f32) -> egui::RichText {
     egui::RichText::new(text).font(bold(size))
@@ -1167,6 +1181,9 @@ pub enum Icon {
     Assistant,
     Health,
     Devices,
+    Friends,
+    Mods,
+    Room,
 }
 
 pub fn icon(painter: &egui::Painter, icon: Icon, centre: Pos2, colour: Color32) {
@@ -1205,6 +1222,42 @@ pub fn icon(painter: &egui::Painter, icon: Icon, centre: Pos2, colour: Color32) 
             }
         }
         Icon::Shop => star4(painter, centre, 10.0, colour),
+        Icon::Friends => {
+            // Two people, one behind the other.
+            painter.circle_stroke(p(-3.5, -4.0), 3.6, stroke);
+            painter.line(
+                vec![
+                    p(-10.0, 8.0),
+                    p(-9.0, 2.5),
+                    p(-3.5, 0.5),
+                    p(2.0, 2.5),
+                    p(3.0, 8.0),
+                ],
+                stroke,
+            );
+            painter.circle_stroke(p(5.0, -6.0), 3.0, stroke);
+            painter.line(vec![p(5.0, -1.5), p(9.0, 0.0), p(10.0, 5.0)], stroke);
+        }
+        Icon::Mods => {
+            // A puzzle piece.
+            let body = Rect::from_center_size(p(-1.0, 1.5), vec2(14.0, 14.0));
+            painter.rect_stroke(body, 2.0, stroke, egui::StrokeKind::Middle);
+            painter.circle_filled(p(-1.0, -6.5), 3.0, colour);
+            painter.circle_filled(p(7.0, 1.5), 3.0, colour);
+        }
+        Icon::Room => {
+            // A couch.
+            let seat = Rect::from_min_max(p(-9.0, 0.0), p(9.0, 5.0));
+            painter.rect_stroke(seat, 2.0, stroke, egui::StrokeKind::Middle);
+            painter.line(
+                vec![p(-7.0, 0.0), p(-7.0, -6.0), p(7.0, -6.0), p(7.0, 0.0)],
+                stroke,
+            );
+            painter.line_segment([p(-11.0, -2.0), p(-11.0, 5.0)], stroke);
+            painter.line_segment([p(11.0, -2.0), p(11.0, 5.0)], stroke);
+            painter.line_segment([p(-8.0, 5.0), p(-8.0, 8.0)], stroke);
+            painter.line_segment([p(8.0, 5.0), p(8.0, 8.0)], stroke);
+        }
         Icon::Devices => {
             // A mouse.
             let body = Rect::from_center_size(p(0.0, 1.0), vec2(12.0, 18.0));

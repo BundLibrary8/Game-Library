@@ -1,0 +1,4 @@
+{"response":{"game_count":3,"games":[
+  {"appid":1145360,"name":"Hades","playtime_forever":2400,"playtime_2weeks":95,"img_icon_url":"abc"},
+  {"appid":413150,"name":"Stardew Valley","playtime_forever":600},
+  {"appid":999,"name":"","playtime_forever":5}]}}
