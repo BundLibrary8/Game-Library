@@ -41,6 +41,7 @@ impl GameLibApp {
             .weekly_playtime(Some(game_id), now(), CHART_WEEKS)
             .unwrap_or_else(|_| vec![0; CHART_WEEKS]);
         let is_finished = tags.iter().any(|t| t.name == FINISHED_COLLECTION);
+        let extras = self.data.extras.get(&game_id).cloned().unwrap_or_default();
         let running = self.running.contains(&game_id);
         ui.add_space(6.0);
 
@@ -126,7 +127,9 @@ impl GameLibApp {
                         self.more_menu(ui, &game, is_finished);
                     });
                 });
-                ui.add_space(14.0);
+                ui.add_space(6.0);
+                self.status_and_rating(ui, &game, &extras);
+                ui.add_space(8.0);
 
                 paint::stat_row(
                     ui,
@@ -184,6 +187,10 @@ impl GameLibApp {
                 });
             });
         });
+        ui.add_space(18.0);
+        self.requirements_panel(ui, &game, &extras);
+        ui.add_space(18.0);
+        self.saves_and_mods_panel(ui, &game, &extras);
     }
 
     /// The ⋯ menu on a game's page.
@@ -236,6 +243,20 @@ impl GameLibApp {
                         .push_str(" Something new unlocked on your profile!");
                 }
             }
+            ui.close();
+        }
+        if ui.button("Set franchise…").clicked() {
+            let extras = self.data.extras.get(&id).cloned().unwrap_or_default();
+            self.dialog = Dialog::Franchise {
+                game_id: id,
+                name: extras
+                    .franchise
+                    .unwrap_or_else(|| gamelib::insights::series_of(&game.title).0),
+                order: extras
+                    .franchise_order
+                    .map(|n| n.to_string())
+                    .unwrap_or_default(),
+            };
             ui.close();
         }
         let collections: Vec<_> = self

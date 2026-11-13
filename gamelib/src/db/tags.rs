@@ -117,6 +117,23 @@ impl Db {
         Ok(tags)
     }
 
+    /// Every game's tag names, by game id (games with no tags are absent).
+    pub fn all_game_tags(&self) -> Result<std::collections::HashMap<i64, Vec<String>>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT gt.game_id, t.name FROM game_tags gt JOIN tags t ON t.id = gt.tag_id
+             ORDER BY t.name",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut map: std::collections::HashMap<i64, Vec<String>> = std::collections::HashMap::new();
+        for row in rows {
+            let (game_id, name) = row?;
+            map.entry(game_id).or_default().push(name);
+        }
+        Ok(map)
+    }
+
     /// How many games carry this tag (for the sidebar counts).
     pub fn tag_game_count(&self, tag_id: i64) -> Result<u64> {
         let n: i64 = self.conn.query_row(
@@ -177,6 +194,7 @@ mod tests {
         db.tag_game(game, tag.id).unwrap(); // twice is fine
         assert_eq!(db.tags_for_game(game).unwrap(), vec![tag.clone()]);
         assert_eq!(db.tag_game_count(tag.id).unwrap(), 1);
+        assert_eq!(db.all_game_tags().unwrap()[&game], ["Backlog"]);
 
         db.untag_game(game, tag.id).unwrap();
         assert!(db.tags_for_game(game).unwrap().is_empty());

@@ -9,12 +9,14 @@
 //!   worker, and the frame around every screen (icon rail, status bar).
 //! - `theme.rs`: colours and fonts for each look.
 //! - `paint.rs`: drawing helpers (gradients, star map, covers, buttons).
-//! - `home.rs`, `library.rs`, `details.rs`, `stats.rs`, `profile.rs`,
-//!   `shop.rs`, `settings.rs`: one screen each.
+//! - `home.rs`, `library.rs`, `details.rs`, `franchises.rs`, `stats.rs`,
+//!   `profile.rs`, `shop.rs`, `settings.rs`: one screen each.
 //! - `dialogs.rs`: the pop-up windows.
 
 mod details;
 mod dialogs;
+mod franchises;
+mod game_extras;
 mod home;
 mod library;
 mod paint;
@@ -24,13 +26,16 @@ mod shop;
 mod stats;
 mod theme;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use anyhow::Result;
 use eframe::egui::{self, Color32, Sense, Stroke, vec2};
 use gamelib::db::{Db, GameQuery, SortBy, keys};
+use gamelib::extras::GameExtras;
 use gamelib::friends::Friend;
+use gamelib::hardware::PcSpecs;
+use gamelib::insights::{self, Recommendation};
 use gamelib::model::{Game, Source, Tag};
 use gamelib::profile::Profile;
 use gamelib::shop::LedgerEntry;
@@ -55,6 +60,7 @@ pub enum Screen {
     Library,
     /// One game's page.
     Details(i64),
+    Franchises,
     Stats,
     Profile,
     Shop,
@@ -66,6 +72,7 @@ impl Screen {
         Some(match name {
             "home" => Screen::Home,
             "library" => Screen::Library,
+            "franchises" => Screen::Franchises,
             "stats" => Screen::Stats,
             "profile" => Screen::Profile,
             "shop" => Screen::Shop,
@@ -110,6 +117,10 @@ pub struct Data {
     pub ledger: Vec<LedgerEntry>,
     /// The library background in use: the equipped one, or the default.
     pub equipped: &'static str,
+    /// Status, rating, franchise and folders for every game.
+    pub extras: HashMap<i64, GameExtras>,
+    /// What to play next, best first.
+    pub recommendations: Vec<Recommendation>,
 }
 
 impl Data {
@@ -144,7 +155,22 @@ impl Data {
             let count = db.tag_game_count(tag.id)?;
             tags.push((tag, count));
         }
+        let extras = db.all_extras()?;
+        // Tags describe a game ("Roguelite"), so they count as tastes.
+        // Collections ("Backlog", "Finished") are just piles, so they don't.
+        let collections: HashSet<&str> = tags
+            .iter()
+            .filter(|(tag, _)| tag.is_collection)
+            .map(|(tag, _)| tag.name.as_str())
+            .collect();
+        let mut taste_tags = db.all_game_tags()?;
+        for names in taste_tags.values_mut() {
+            names.retain(|name| !collections.contains(name.as_str()));
+        }
+        let recommendations = insights::recommend(&visible, &extras, &taste_tags, 12);
         Ok(Data {
+            extras,
+            recommendations,
             visible,
             games,
             hidden_count,
@@ -220,6 +246,8 @@ pub struct GameLibApp {
     preview: Option<(Backdrop, f64)>,
     /// A background forced with the GAMELIB_THEME environment variable.
     forced_backdrop: Option<Backdrop>,
+    /// This PC's specs, read once in the background at startup.
+    specs: std::sync::Arc<std::sync::Mutex<Option<PcSpecs>>>,
     /// Whether the backgrounds move.
     animate: bool,
     /// The clock the backgrounds are drawn at this frame, or `None` when
@@ -294,7 +322,16 @@ impl GameLibApp {
             steamgriddb_key: db.get_setting(keys::STEAMGRIDDB_KEY)?.unwrap_or_default(),
             steam_key: db.get_setting(keys::STEAM_API_KEY)?.unwrap_or_default(),
         };
+        // Reading the PC's specs takes a moment, so it's done on its own
+        // thread rather than holding up the window.
+        let specs = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let slot = std::sync::Arc::clone(&specs);
+        std::thread::spawn(move || match gamelib::hardware::detect_specs() {
+            Ok(found) => *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(found),
+            Err(err) => log::warn!("couldn't read this PC's specs: {err:#}"),
+        });
         let mut app = GameLibApp {
+            specs,
             data: Data::load(&db, Filter::All, "", SortBy::LastPlayed)?,
             animate: db.get_bool_setting(ANIMATE_KEY, true)?,
             anim_time: None,
@@ -367,6 +404,11 @@ impl GameLibApp {
         if self.running.insert(game_id) {
             self.start_job(Job::Launch { game_id }, "Starting…");
         }
+    }
+
+    /// This PC's specs, once they have been read.
+    fn pc_specs(&self) -> Option<PcSpecs> {
+        self.specs.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     fn title_of(&self, game_id: i64) -> String {
@@ -555,7 +597,7 @@ impl GameLibApp {
         );
 
         ui.vertical_centered(|ui| {
-            ui.spacing_mut().item_spacing.y = 14.0;
+            ui.spacing_mut().item_spacing.y = 10.0;
             ui.add_space(34.0);
 
             // The orb: your profile.
@@ -587,6 +629,7 @@ impl GameLibApp {
             for (screen, icon, tip) in [
                 (Screen::Home, Icon::Home, "Home"),
                 (Screen::Library, Icon::Library, "Library"),
+                (Screen::Franchises, Icon::Franchises, "Franchises"),
                 (Screen::Stats, Icon::Stats, "Stats"),
                 (Screen::Shop, Icon::Shop, "Shop"),
                 (Screen::Settings, Icon::Settings, "Settings"),
@@ -758,6 +801,7 @@ impl eframe::App for GameLibApp {
                                     Screen::Home => self.home_screen(ui),
                                     Screen::Library => self.library_screen(ui),
                                     Screen::Details(game_id) => self.details_screen(ui, game_id),
+                                    Screen::Franchises => self.franchises_screen(ui),
                                     Screen::Stats => self.stats_screen(ui),
                                     Screen::Profile => self.profile_screen(ui),
                                     Screen::Shop => self.shop_screen(ui),

@@ -1039,6 +1039,7 @@ pub fn bar(ui: &mut Ui, theme: &Theme, fraction: f32, colour: Color32, width: f3
 pub enum Icon {
     Home,
     Library,
+    Franchises,
     Stats,
     Shop,
     Settings,
@@ -1061,6 +1062,16 @@ pub fn icon(painter: &egui::Painter, icon: Icon, centre: Pos2, colour: Color32) 
                     let at = p(-7.0 + column as f32 * 7.0, -7.0 + row as f32 * 7.0);
                     painter.rect_filled(Rect::from_center_size(at, Vec2::splat(4.6)), 1.0, colour);
                 }
+            }
+        }
+        Icon::Franchises => {
+            // Three cards fanned out, like a series on a shelf.
+            for (i, x) in [-7.0_f32, 0.0, 7.0].into_iter().enumerate() {
+                let rect = Rect::from_center_size(
+                    p(x, 0.0),
+                    vec2(5.0, 15.0 - (i as f32 - 1.0).abs() * 3.0),
+                );
+                painter.rect_filled(rect, 1.2, colour);
             }
         }
         Icon::Stats => {

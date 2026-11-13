@@ -5,6 +5,7 @@
       "type": "game",
       "name": "Dota 2",
       "steam_appid": 570,
+      "pc_requirements": { "minimum": "<strong>Minimum:</strong><br><ul class=\"bb_ul\"><li><strong>OS:</strong> Windows 7 or newer<br></li><li><strong>Processor:</strong> Dual core from Intel or AMD at 2.8 GHz<br></li><li><strong>Memory:</strong> 4 GB RAM<br></li><li><strong>Graphics:</strong> NVIDIA GeForce 8600/9600GT<br></li><li><strong>Storage:</strong> 60 GB available space</li></ul>" },
       "header_image": "https://cdn.akamai.steamstatic.com/steam/apps/570/header.jpg",
       "short_description": "Every day, millions of players worldwide enter battle as one of over a hundred Dota heroes.",
       "genres": [

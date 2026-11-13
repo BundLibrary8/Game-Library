@@ -126,6 +126,43 @@ impl GameLibApp {
             });
         }
 
+        // Recommended for you: unplayed games that match what you play most.
+        if !self.data.recommendations.is_empty() {
+            ui.add_space(26.0);
+            ui.label(paint::strong("Recommended for you", 19.0));
+            ui.label(paint::muted(
+                "Games you own but have hardly played, picked from the genres, tags and ratings of the ones you play most.",
+                &theme,
+            ));
+            ui.add_space(4.0);
+            let picks: Vec<Game> = self
+                .data
+                .recommendations
+                .iter()
+                .filter_map(|pick| self.data.game(pick.game_id).cloned())
+                .collect();
+            let reasons: std::collections::HashMap<i64, String> = self
+                .data
+                .recommendations
+                .iter()
+                .map(|pick| (pick.game_id, pick.reason.clone()))
+                .collect();
+            if let Some(c) = game_grid(ui, &theme, &picks, &self.running, 170.0, Some(1)) {
+                click = Some(c);
+            }
+            // Why the first few were picked.
+            let why: Vec<String> = picks
+                .iter()
+                .take(3)
+                .filter_map(|game| {
+                    reasons
+                        .get(&game.id)
+                        .map(|reason| format!("{}: {reason}", game.title))
+                })
+                .collect();
+            ui.label(paint::muted(why.join("   ·   "), &theme).size(13.5));
+        }
+
         ui.add_space(26.0);
         ui.label(paint::strong("Recently added", 19.0));
         ui.add_space(4.0);

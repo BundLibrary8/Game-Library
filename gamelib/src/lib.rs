@@ -15,11 +15,19 @@
 //! - [`profile`]  the local profile, showcase, badges and earned banners
 //! - [`friends`]  read-only Steam friends list
 //! - [`shop`]     Stardust ledger, rewards and the cosmetics shop
+//! - [`extras`]   completion status, rating, franchise and folders per game
+//! - [`insights`] recommendations and franchise grouping
+//! - [`hardware`] this PC's specs and "can I run it" checks
+//! - [`backup`]   save-game backups, mod lists, and library export/import
 //! - [`worker`]   the background thread the UI talks to through channels
 
 pub mod artwork;
+pub mod backup;
 pub mod db;
+pub mod extras;
 pub mod friends;
+pub mod hardware;
+pub mod insights;
 pub mod launcher;
 pub mod metadata;
 pub mod model;

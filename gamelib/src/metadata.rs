@@ -180,6 +180,9 @@ pub struct StoreInfo {
     pub release_year: Option<u16>,
     /// The game's wide store banner: a fallback when it has no cover.
     pub header_image: Option<String>,
+    /// Minimum and recommended PC requirements, as plain text.
+    pub requirements_min: Option<String>,
+    pub requirements_rec: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -195,6 +198,10 @@ struct AppDetails {
     genres: Vec<Genre>,
     release_date: Option<ReleaseDate>,
     header_image: Option<String>,
+    /// An object with "minimum" and "recommended" HTML, or an empty list
+    /// when the store has none, so it is read loosely.
+    #[serde(default)]
+    pc_requirements: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -214,6 +221,19 @@ pub fn parse_year(date: &str) -> Option<u16> {
         .filter(|part| part.len() == 4)
         .filter_map(|part| part.parse::<u16>().ok())
         .find(|year| (1970..=2100).contains(year))
+}
+
+/// One part ("minimum" or "recommended") of the store's requirements, as
+/// plain text without its "Minimum:" heading.
+fn requirements_text(requirements: &serde_json::Value, part: &str) -> Option<String> {
+    let html = requirements.get(part)?.as_str()?;
+    let text = crate::hardware::html_to_text(html);
+    let text = text
+        .lines()
+        .filter(|line| !matches!(line.to_lowercase().as_str(), "minimum:" | "recommended:"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.is_empty()).then_some(text)
 }
 
 /// Parse a Steam Store `appdetails` response. Returns `None` when the
@@ -236,6 +256,8 @@ pub fn parse_store_details(json: &str, app_id: &str) -> Result<Option<StoreInfo>
         release_year: data.release_date.and_then(|d| parse_year(&d.date)),
         // Only a proper web address is kept; it will be downloaded later.
         header_image: data.header_image.filter(|url| url.starts_with("https://")),
+        requirements_min: requirements_text(&data.pc_requirements, "minimum"),
+        requirements_rec: requirements_text(&data.pc_requirements, "recommended"),
     }))
 }
 
@@ -313,6 +335,10 @@ mod tests {
             info.header_image.as_deref(),
             Some("https://cdn.akamai.steamstatic.com/steam/apps/570/header.jpg")
         );
+        let minimum = info.requirements_min.unwrap();
+        assert!(minimum.contains("Memory: 4 GB RAM"), "{minimum}");
+        assert!(!minimum.contains("Minimum"), "the heading is dropped");
+        assert_eq!(info.requirements_rec, None);
     }
 
     #[test]
@@ -322,6 +348,10 @@ mod tests {
             None
         );
         assert_eq!(parse_store_details(APPDETAILS, "999").unwrap(), None);
+        // A game with no requirements sends an empty list instead.
+        let bare = r#"{"5":{"success":true,"data":{"pc_requirements":[]}}}"#;
+        let info = parse_store_details(bare, "5").unwrap().unwrap();
+        assert_eq!(info.requirements_min, None);
         assert!(parse_store_details("[]", "570").is_err());
     }
 

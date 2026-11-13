@@ -118,6 +118,18 @@ const MIGRATIONS: &[&str] = &[
     ",
     // v3: each game's own icon
     "ALTER TABLE games ADD COLUMN icon_path TEXT;",
+    // v4: completion status, ratings, franchises, save and mod folders,
+    // and system requirements
+    "
+    ALTER TABLE games ADD COLUMN status TEXT;
+    ALTER TABLE games ADD COLUMN rating INTEGER;
+    ALTER TABLE games ADD COLUMN franchise TEXT;
+    ALTER TABLE games ADD COLUMN franchise_order INTEGER;
+    ALTER TABLE games ADD COLUMN save_dir TEXT;
+    ALTER TABLE games ADD COLUMN mods_dir TEXT;
+    ALTER TABLE games ADD COLUMN requirements_min TEXT;
+    ALTER TABLE games ADD COLUMN requirements_rec TEXT;
+    ",
 ];
 
 /// A connection to the library database.

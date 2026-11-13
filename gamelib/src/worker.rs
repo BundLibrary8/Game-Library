@@ -515,15 +515,8 @@ impl WorkerState {
         if game.source == Source::Steam
             && let Some(info) = metadata::fetch_store_info(client, &game.source_id)?
         {
-            // The store reply also has the description, so keep it.
-            if game.description.is_none() {
-                self.db.set_game_info(
-                    game.id,
-                    info.description.as_deref(),
-                    &info.genres,
-                    info.release_year,
-                )?;
-            }
+            // The store reply also has the description and requirements.
+            self.save_store_info(game, &info)?;
             if let Some(url) = info.header_image {
                 return metadata::download_cover(client, &url, covers_dir, game.id).map(Some);
             }
@@ -566,31 +559,57 @@ impl WorkerState {
             thread::sleep(metadata::REQUEST_PAUSE);
         }
 
-        // Description, genres and year for Steam games that lack them.
-        let needs_info = self
-            .db
-            .list_games()?
-            .into_iter()
-            .filter(|g| g.source == Source::Steam && g.description.is_none());
+        // Description, genres, year and system requirements for Steam
+        // games that lack them.
+        let extras = self.db.all_extras()?;
+        let needs_info = self.db.list_games()?.into_iter().filter(|g| {
+            g.source == Source::Steam
+                && (g.description.is_none()
+                    || extras
+                        .get(&g.id)
+                        .is_none_or(|e| e.requirements_min.is_none()))
+        });
         for game in needs_info {
             match metadata::fetch_store_info(&client, &game.source_id) {
                 Ok(Some(info)) => {
-                    self.db.set_game_info(
-                        game.id,
-                        info.description.as_deref(),
-                        &info.genres,
-                        info.release_year,
-                    )?;
+                    self.save_store_info(&game, &info)?;
+                    // Remember that we asked, so a game with no requirements
+                    // listed isn't fetched again on every scan.
+                    if info.requirements_min.is_none() {
+                        self.db.set_requirements(game.id, Some(""), None)?;
+                    }
                     self.reporter
                         .send(WorkerResult::InfoReady { game_id: game.id });
                 }
-                Ok(None) => {}
+                Ok(None) => {
+                    self.db.set_requirements(game.id, Some(""), None)?;
+                }
                 Err(err) => log::warn!("store info for {} failed: {err:#}", game.title),
             }
             thread::sleep(metadata::REQUEST_PAUSE);
         }
         self.reporter
             .send(WorkerResult::CoversFinished { downloaded, failed });
+        Ok(())
+    }
+
+    /// Save what the Steam Store said about a game.
+    fn save_store_info(&self, game: &Game, info: &metadata::StoreInfo) -> Result<()> {
+        if game.description.is_none() {
+            self.db.set_game_info(
+                game.id,
+                info.description.as_deref(),
+                &info.genres,
+                info.release_year,
+            )?;
+        }
+        if info.requirements_min.is_some() || info.requirements_rec.is_some() {
+            self.db.set_requirements(
+                game.id,
+                info.requirements_min.as_deref(),
+                info.requirements_rec.as_deref(),
+            )?;
+        }
         Ok(())
     }
 
