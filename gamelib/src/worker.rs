@@ -60,6 +60,9 @@ pub enum Job {
     MeasureDisk,
     /// Ask GitHub whether a newer GameLib has been released.
     CheckForUpdates,
+    /// For a published build: download a newer GameLib and put it in place
+    /// (in the background; it reports `Updated` only if it did).
+    UpdateItself,
     /// List the connected peripherals and paired Bluetooth devices.
     ScanDevices,
     /// Connect or disconnect a paired Bluetooth device.
@@ -234,6 +237,8 @@ pub enum WorkerResult {
     },
     /// The result of checking for a newer version.
     UpdateChecked(Result<crate::updates::UpdateCheck, String>),
+    /// A newer GameLib has been put in place; it runs from the next start.
+    Updated(String),
     /// What's plugged in, and the paired Bluetooth devices (or why they
     /// couldn't be listed).
     DevicesFound {
@@ -310,6 +315,7 @@ impl Job {
                 | Job::ScanDevices
                 | Job::AskClaude { .. }
                 | Job::CheckForUpdates
+                | Job::UpdateItself
                 | Job::WatchForGames(_)
                 | Job::Cloud(_)
         )
@@ -534,6 +540,7 @@ impl WorkerState {
             Job::AskClaude { .. } => "Couldn't ask Claude".to_string(),
             Job::MeasureDisk => "Couldn't measure disk use".to_string(),
             Job::CheckForUpdates => "Couldn't check for updates".to_string(),
+            Job::UpdateItself => "Couldn't update GameLib".to_string(),
             Job::ScanDevices => "Couldn't list devices".to_string(),
             Job::SetBluetooth { .. } => "Bluetooth".to_string(),
             Job::WatchForGames(_) => "Couldn't watch for games".to_string(),
@@ -587,6 +594,21 @@ impl WorkerState {
                 let result = crate::updates::check().map_err(|err| format!("{err:#}"));
                 self.reporter.send(WorkerResult::UpdateChecked(result));
                 Ok(())
+            }
+            Job::UpdateItself => {
+                // A download can take a while: do it on its own thread so
+                // the fast lane stays free for Play.
+                let reporter = self.reporter.clone();
+                std::thread::Builder::new()
+                    .name("update".into())
+                    .spawn(move || match crate::updates::update_itself() {
+                        Ok(Some(version)) => reporter.send(WorkerResult::Updated(version)),
+                        Ok(None) => log::info!("GameLib is up to date"),
+                        // Offline, GitHub busy…: try again next time.
+                        Err(err) => log::warn!("couldn't update GameLib: {err:#}"),
+                    })
+                    .map(drop)
+                    .map_err(anyhow::Error::from)
             }
             Job::FetchMissingCovers { retry_all } => self.fetch_missing_covers(retry_all),
             Job::FetchCover {

@@ -6,6 +6,28 @@ games you add by hand) into one
 library. It launches them, tracks how long you play, and shows covers,
 stats, recommendations and more.
 
+## Download (no setup)
+
+**[Download GameLib.exe](https://github.com/BundLibrary8/Game-Library/releases/latest/download/GameLib.exe)**
+
+Open it, and that's it: there's nothing to install. To share GameLib, send
+someone that link. It always downloads the newest version.
+
+- **It updates itself.** Each time it opens, GameLib checks GitHub for a
+  newer version. If there is one, it downloads it in the background, shows
+  "Updated to GameLib …" and restarts into it. (If you're playing a game at
+  that moment, the new version waits until the next time you open
+  GameLib.) Switch this off in **Settings → Updates and sharing**.
+- **"Windows protected your PC".** The first time you open it, Windows may
+  say this, because the program isn't signed. Press **More info**, then
+  **Run anyway**.
+- **Where to keep it.** Anywhere you like (Desktop, Documents, a games
+  folder), as long as you can save files there, so it can update itself.
+  Your library is kept separately in `%APPDATA%\gamelib\`, so moving or
+  replacing the program never loses anything.
+
+The rest of this page is for running GameLib from its source code.
+
 ## What you need
 
 - **Windows 10 or 11**
@@ -406,24 +428,21 @@ Your library is normally kept in `%APPDATA%\gamelib\`.
 
 ## Releases
 
-Releases are built automatically. To make one:
+Every time something is merged into `main`, GitHub Actions
+(`.github/workflows/release.yml`) tests and builds GameLib on Windows and
+publishes `GameLib.exe` as a new release, marked as the latest. You don't
+need to do anything. Each one is numbered `v<major>.<minor>.<build>`; the
+major and minor numbers come from `version` in `gamelib/Cargo.toml`, and
+the build number goes up by one each time. Change `version` there (for
+example to `0.3.0`) to start a new series.
 
-1. Add a section for the new version at the top of `CHANGELOG.md`.
-2. Change `version` in `gamelib/Cargo.toml` to match.
-3. Commit, then tag and push the tag:
+You can also run it by hand: on GitHub, open **Actions → Release → Run
+workflow**.
 
-```bash
-git tag v0.2.0
-```
-
-```bash
-git push origin v0.2.0
-```
-
-GitHub Actions then builds `gamelib.exe` on Windows, zips it with the
-README and changelog, and publishes a GitHub release with that version's
-notes. **Settings → Updates → Check for updates** looks at those releases.
-Every push and pull request also runs the tests (`.github/workflows/ci.yml`).
+Every copy of `GameLib.exe` looks for the newest release when it opens and
+updates itself. A copy you run from the source code (`cargo run`) never
+replaces itself; it updates with `git pull`. Every push and pull request
+also runs the tests (`.github/workflows/ci.yml`).
 
 ## More
 

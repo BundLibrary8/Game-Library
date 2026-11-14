@@ -518,6 +518,9 @@ pub struct GameLibApp {
     goal_noticed: Option<i64>,
     /// A newer version, found by checking for updates.
     update: Option<gamelib::updates::Release>,
+    /// A newer GameLib has been put in place: its version, and when the
+    /// "Restarting…" message started (to restart a moment later).
+    restarting: Option<(String, Option<f64>)>,
     /// The clock the backgrounds are drawn at this frame, or `None` when
     /// they are standing still.
     anim_time: Option<f64>,
@@ -684,6 +687,7 @@ impl GameLibApp {
             unlocked_seen: None,
             goal_noticed: None,
             update: None,
+            restarting: None,
             splash: db
                 .get_bool_setting(SPLASH_KEY, true)?
                 .then(splash::Splash::new),
@@ -722,6 +726,16 @@ impl GameLibApp {
         }
         app.start_discord();
         app.start_cloud();
+        // A published build tidies up after its last update and looks for
+        // the next one.
+        if gamelib::updates::PUBLISHED {
+            if let Ok(exe) = std::env::current_exe() {
+                gamelib::updates::clean_up_soon(exe);
+            }
+            if app.db.get_bool_setting(gamelib::updates::AUTO_KEY, true)? {
+                app.worker.send(Job::UpdateItself);
+            }
+        }
         // Notice games started from Steam, shortcuts and so on, and track
         // their playtime too.
         if app.db.get_bool_setting(AUTO_DETECT_KEY, true)? {
@@ -843,6 +857,7 @@ impl GameLibApp {
                 | WorkerResult::BluetoothChanged { .. }
                 | WorkerResult::DiskProgress { .. }
                 | WorkerResult::UpdateChecked(_)
+                | WorkerResult::Updated(_)
                 | WorkerResult::AssistantReply(_)
                 | WorkerResult::SessionStarted { .. }
                 | WorkerResult::NeverStarted { .. }
@@ -1016,6 +1031,18 @@ impl GameLibApp {
                         "Measured {games} games: {} in all.",
                         gamelib::health::format_bytes(bytes)
                     );
+                }
+                WorkerResult::Updated(version) => {
+                    if self.running.is_empty() {
+                        // Nothing's being played: restart into it now.
+                        self.restarting = Some((version, None));
+                    } else {
+                        self.toast(
+                            &format!("GameLib {version} is installed"),
+                            "It starts the next time you open GameLib.",
+                        );
+                    }
+                    self.update = None;
                 }
                 WorkerResult::UpdateChecked(result) => {
                     self.job_done();
@@ -1392,6 +1419,28 @@ impl GameLibApp {
         }
 
         self.window_events(&ctx, time);
+
+        // Just updated: say so for a moment, then start the new version.
+        if let Some((version, started)) = &mut self.restarting {
+            let started = *started.get_or_insert(time);
+            let version = version.clone();
+            self.restarting_screen(&ctx, &version, time - started);
+            if time - started >= 1.6 {
+                let restarted = std::env::current_exe()
+                    .map_err(anyhow::Error::from)
+                    .and_then(|exe| gamelib::updates::restart(&exe));
+                match restarted {
+                    Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                    Err(err) => {
+                        self.error = Some(format!(
+                            "GameLib {version} is installed; open GameLib again to use it ({err:#})."
+                        ));
+                    }
+                }
+                self.restarting = None;
+            }
+            ctx.request_repaint();
+        }
 
         // GameLib opens on the log-in screen until you log in, continue as
         // the account it remembers, or skip it.

@@ -1,11 +1,17 @@
 # Changelog
 
-Every release of GameLib, newest first. The release workflow copies the
-section for a version into its GitHub release notes, so add a section here
-before tagging a release.
+What's new in GameLib, newest first. Every change merged into `main` is
+published as a release automatically (see "Releases" in the README); this
+file collects the highlights.
 
 ## [0.2.0]
 
+- One file to download and share: every change merged into `main` is
+  published as `GameLib.exe`, and
+  <https://github.com/BundLibrary8/Game-Library/releases/latest/download/GameLib.exe>
+  always gets the newest one. It updates itself each time it opens
+  (download in the background, swap, restart), and can be switched off in
+  Settings. The link can be copied from Settings → Updates and sharing.
 - GameLib opens on a log-in screen: your own covers drift behind a glass
   card for logging in or creating an account, beside the logo and what
   GameLib does. It always opens there: a remembered login shows

@@ -526,8 +526,46 @@ impl GameLibApp {
 
         theme.panel_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(paint::strong("Updates", 17.0));
-            ui.label(format!("This is GameLib {}.", gamelib::updates::VERSION));
+            ui.label(paint::strong("Updates and sharing", 17.0));
+            if gamelib::updates::PUBLISHED {
+                ui.label(format!("This is GameLib {}.", gamelib::updates::VERSION));
+                let mut auto = self
+                    .db
+                    .get_bool_setting(gamelib::updates::AUTO_KEY, true)
+                    .unwrap_or(true);
+                if ui
+                    .checkbox(
+                        &mut auto,
+                        "Update automatically when GameLib opens",
+                    )
+                    .changed()
+                {
+                    self.check(self.db.set_bool_setting(gamelib::updates::AUTO_KEY, auto));
+                }
+            } else {
+                ui.label(format!(
+                    "This is GameLib {}, built from the source code. It updates when you run git pull and cargo run; the downloadable GameLib.exe updates itself.",
+                    gamelib::updates::VERSION
+                ));
+            }
+            ui.add_space(4.0);
+            ui.label(paint::muted(
+                "Share GameLib: anyone with this link gets the newest GameLib.exe. There's nothing to install: they open it, and it keeps itself up to date.",
+                &theme,
+            ));
+            let link = gamelib::updates::share_link();
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut link.clone())
+                        .desired_width(460.0)
+                        .interactive(true),
+                );
+                if ui.button("Copy download link").clicked() {
+                    ui.ctx().copy_text(link.clone());
+                    self.status = "Download link copied.".into();
+                }
+            });
+            ui.add_space(4.0);
             ui.horizontal(|ui| {
                 if ui.button("Check for updates").clicked() {
                     self.start_job(gamelib::worker::Job::CheckForUpdates, "Checking for updates…");
@@ -544,6 +582,13 @@ impl GameLibApp {
                     ui.label(paint::muted(release.notes.chars().take(600).collect::<String>(), &theme));
                 }
                 ui.horizontal(|ui| {
+                    if gamelib::updates::PUBLISHED
+                        && release.exe.is_some()
+                        && ui.button("Update now").clicked()
+                    {
+                        self.worker.send(gamelib::worker::Job::UpdateItself);
+                        self.status = format!("Downloading GameLib {}…", release.version);
+                    }
                     if let Some(download) = &release.download
                         && ui.button("Download").clicked()
                     {
