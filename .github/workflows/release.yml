@@ -1,19 +1,28 @@
-# Makes a release when a version tag is pushed:
+# Publishes GameLib.exe every time something is merged into main (and when
+# run by hand from the Actions tab).
 #
-#   git tag v0.2.0
-#   git push origin v0.2.0
+# Each build gets its own version, v<major>.<minor>.<build number>, with the
+# major and minor numbers from gamelib/Cargo.toml. The version is baked into
+# the program (GAMELIB_VERSION), and the release is marked as the latest, so:
 #
-# It builds gamelib.exe on Windows, zips it with the README and changelog,
-# and publishes a GitHub release with the notes for that version from
-# CHANGELOG.md. GameLib's "Check for updates" looks at these releases.
+# - this link always downloads the newest GameLib, ready to share:
+#   https://github.com/BundLibrary8/Game-Library/releases/latest/download/GameLib.exe
+# - every GameLib.exe checks for a newer release when it opens, downloads
+#   it, swaps it in and restarts (see gamelib/src/updates.rs).
 name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+# One release at a time, in order.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   windows:
@@ -24,11 +33,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: gamelib
-      - name: Check the tag matches Cargo.toml
+      - name: Work out the version
         shell: bash
         run: |
-          version=$(grep -m1 '^version' gamelib/Cargo.toml | cut -d'"' -f2)
-          test "v$version" = "${GITHUB_REF_NAME}" || { echo "Tag ${GITHUB_REF_NAME} but Cargo.toml says $version"; exit 1; }
+          base=$(grep -m1 '^version' gamelib/Cargo.toml | cut -d'"' -f2 | cut -d. -f1,2)
+          version="$base.${GITHUB_RUN_NUMBER}"
+          echo "GAMELIB_VERSION=$version" >> "$GITHUB_ENV"
+          echo "Building GameLib $version"
       - name: Test
         working-directory: gamelib
         run: cargo test --release
@@ -38,20 +49,27 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          mkdir -p dist/GameLib
-          cp gamelib/target/release/gamelib.exe dist/GameLib/
-          cp README.md CHANGELOG.md dist/GameLib/
-          cd dist && 7z a "gamelib-${GITHUB_REF_NAME}-windows.zip" GameLib
-      - name: Release notes from the changelog
+          mkdir -p dist
+          cp gamelib/target/release/gamelib.exe dist/GameLib.exe
+      - name: Release notes
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          awk -v v="$version" '
-            /^## / { if (found) exit; if (index($0, "[" v "]")) { found = 1; next } }
-            found { print }
-          ' CHANGELOG.md > notes.md
-          test -s notes.md || echo "GameLib ${GITHUB_REF_NAME}" > notes.md
+          {
+            echo "## Download"
+            echo
+            echo "**[GameLib.exe](https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/GameLib.exe)**: open it, nothing to install. It updates itself whenever it opens."
+            echo
+            echo "Windows may say \"Windows protected your PC\" the first time: press **More info**, then **Run anyway**."
+            echo
+            echo "## What changed"
+            echo
+            git log -1 --format=%B "${GITHUB_SHA}"
+          } > notes.md
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.zip
+          tag_name: v${{ env.GAMELIB_VERSION }}
+          name: GameLib ${{ env.GAMELIB_VERSION }}
+          target_commitish: ${{ github.sha }}
+          files: dist/GameLib.exe
           body_path: notes.md
+          make_latest: true

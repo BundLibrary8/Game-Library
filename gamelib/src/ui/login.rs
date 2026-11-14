@@ -618,6 +618,64 @@ impl GameLibApp {
     }
 }
 
+impl GameLibApp {
+    /// "Updated to GameLib …, restarting", over everything, for the moment
+    /// before the new version starts.
+    pub fn restarting_screen(&self, ctx: &egui::Context, version: &str, t: f64) {
+        let theme = self.theme;
+        let screen = ctx.content_rect();
+        let painter = egui::Area::new(egui::Id::unique("restarting"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen.min)
+            .interactable(true)
+            .show(ctx, |ui| {
+                ui.allocate_rect(screen, Sense::click_and_drag());
+                ui.painter().clone()
+            })
+            .inner
+            .with_clip_rect(screen);
+        let time = ctx.input(|i| i.time);
+        let fade = ease_out((t / 0.3) as f32);
+        let mut painter = painter;
+        painter.set_opacity(fade);
+        paint::backdrop(&painter, screen, &theme, &self.stars, Some(time));
+        let centre = screen.center() - vec2(0.0, 30.0);
+        let [r, g, b, _] = theme.accent.to_array();
+        paint::glow(
+            &painter,
+            centre,
+            110.0,
+            Color32::from_rgba_unmultiplied(r, g, b, 80),
+        );
+        for i in 0..8 {
+            let angle = time as f32 * 2.4 + TAU * i as f32 / 8.0;
+            let at = centre + vec2(angle.cos(), angle.sin()) * 54.0;
+            let colour = if i % 2 == 0 {
+                theme.accent
+            } else {
+                theme.accent_end
+            };
+            paint::star4(&painter, at, 5.0, colour);
+        }
+        paint::star4(&painter, centre, 28.0, theme.accent);
+        paint::star4(&painter, centre, 14.0, Color32::WHITE);
+        painter.text(
+            centre + vec2(0.0, 104.0),
+            egui::Align2::CENTER_CENTER,
+            format!("Updated to GameLib {version}"),
+            bold(30.0),
+            theme.text,
+        );
+        painter.text(
+            centre + vec2(0.0, 140.0),
+            egui::Align2::CENTER_CENTER,
+            "Restarting…",
+            regular(16.0),
+            theme.muted,
+        );
+    }
+}
+
 /// Columns of covers sliding slowly up and down.
 fn cover_wall(ui: &mut egui::Ui, screen: Rect, covers: &[&Game], time: f64, opacity: f32) {
     let cell = COVER.y + COVER_GAP;
